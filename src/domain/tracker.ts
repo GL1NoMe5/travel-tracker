@@ -4,6 +4,8 @@ import type { City, PlaceCandidate, TrackerData, Visit } from './types';
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_NOTE_LENGTH = 1000;
 export const MAX_NAME_LENGTH = 120;
+export const MAX_COUNTRY_VISITS = 999;
+export const DEFAULT_COUNTRY_COLOR = '#C45B3D';
 export const COLOR_PRESETS = ['#46A88C', '#68A8D5', '#8885CB', '#D788AB', '#E5A564', '#D6BC62', '#85B66E', '#CC7773'] as const;
 
 export class DataValidationError extends Error {
@@ -47,6 +49,18 @@ export function validateTrackerData(input: unknown): TrackerData {
     if (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color)) fail(`Неверный цвет страны ${code}.`);
     countryColors[code] = color.toUpperCase();
   }
+  const rawCountryVisits = root.countryVisits === undefined ? {} : record(root.countryVisits, 'Посещения стран');
+  const countryVisits: Record<string, number> = {};
+  for (const [code, count] of Object.entries(rawCountryVisits)) {
+    if (!isCountryCode(code)) fail(`Неизвестная страна: ${code}.`);
+    if (!Object.hasOwn(countryColors, code)) fail(`Посещения указаны для неотмеченной страны ${code}.`);
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > MAX_COUNTRY_VISITS) {
+      fail(`Количество посещений страны ${code} должно быть целым числом от 1 до ${MAX_COUNTRY_VISITS}.`);
+    }
+    countryVisits[code] = count;
+  }
+  // Older v1 snapshots recorded only the presence of a country, not trip counts.
+  for (const code of Object.keys(countryColors)) countryVisits[code] ??= 1;
   if (!Array.isArray(root.cities) || root.cities.length > 5000) fail('Ожидается список, содержащий не более 5000 городов.');
   const cityIds = new Set<string>();
   const visitIds = new Set<string>();
@@ -84,10 +98,10 @@ export function validateTrackerData(input: unknown): TrackerData {
       osmRefs: refs, visits,
     };
   });
-  return { schemaVersion: 1, countryColors, cities };
+  return { schemaVersion: 1, countryColors, countryVisits, cities };
 }
 
-export const createEmptyData = (): TrackerData => ({ schemaVersion: 1, countryColors: {}, cities: [] });
+export const createEmptyData = (): TrackerData => ({ schemaVersion: 1, countryColors: {}, countryVisits: {}, cities: [] });
 export const createVisit = (): Visit => ({ id: crypto.randomUUID(), date: null, note: '' });
 export function createCity(candidate: PlaceCandidate): City {
   return {
@@ -99,6 +113,7 @@ export function createCity(candidate: PlaceCandidate): City {
 
 export type TrackerAction =
   | { type: 'colorCountry'; code: string; color: string }
+  | { type: 'setCountryVisits'; code: string; count: number }
   | { type: 'resetCountry'; code: string }
   | { type: 'saveCity'; city: City }
   | { type: 'deleteCity'; id: string }
@@ -107,9 +122,15 @@ export type TrackerAction =
 export function trackerReducer(state: TrackerData, action: TrackerAction): TrackerData {
   switch (action.type) {
     case 'colorCountry': return validateTrackerData({ ...state, countryColors: { ...state.countryColors, [action.code]: action.color } });
+    case 'setCountryVisits': return validateTrackerData({
+      ...state,
+      countryColors: { ...state.countryColors, [action.code]: state.countryColors[action.code] ?? DEFAULT_COUNTRY_COLOR },
+      countryVisits: { ...state.countryVisits, [action.code]: action.count },
+    });
     case 'resetCountry': {
       const colors = { ...state.countryColors }; delete colors[action.code];
-      return { ...state, countryColors: colors };
+      const countryVisits = { ...state.countryVisits }; delete countryVisits[action.code];
+      return validateTrackerData({ ...state, countryColors: colors, countryVisits });
     }
     case 'saveCity': return validateTrackerData({ ...state, cities: state.cities.some(c => c.id === action.city.id) ? state.cities.map(c => c.id === action.city.id ? action.city : c) : [...state.cities, action.city] });
     case 'deleteCity': return { ...state, cities: state.cities.filter(c => c.id !== action.id) };
@@ -130,9 +151,14 @@ export function findCityMatch(cities: readonly City[], candidate: PlaceCandidate
   }) };
 }
 
+export function getCountryVisitCount(data: TrackerData, code: string): number {
+  return isCountryCode(code) && Object.hasOwn(data.countryColors, code) ? data.countryVisits?.[code] ?? 1 : 0;
+}
+
 export function getStats(data: TrackerData) {
   const countries = Object.keys(data.countryColors).filter(isCountryCode).length;
-  return { countries, totalCountries: 195, percent: countries / 195 * 100, cities: data.cities.length, visits: data.cities.reduce((sum, city) => sum + city.visits.length, 0) };
+  const countryVisits = Object.keys(data.countryColors).filter(isCountryCode).reduce((sum, code) => sum + getCountryVisitCount(data, code), 0);
+  return { countries, totalCountries: 195, percent: countries / 195 * 100, countryVisits, cities: data.cities.length, visits: data.cities.reduce((sum, city) => sum + city.visits.length, 0) };
 }
 
 export function latestVisitDate(city: City): string | null {

@@ -1,6 +1,7 @@
 import type { City, InteractionMode, LngLat } from '../domain/types';
 
 export interface TravelMapProps {
+  theme?: 'light' | 'dark';
   mode: InteractionMode;
   countryColors: Readonly<Record<string, string>>;
   cities: readonly City[];

@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { boot, city, openCities, openSearch, seed, type MapRoot } from './helpers';
 
-test('the casual home exposes two actions and no technical tools; panels are exclusive', async ({ page }, testInfo) => {
+test('the home exposes travel actions and a summary without technical tools; panels are exclusive', async ({ page }, testInfo) => {
   await boot(page);
   await expect(page.getByRole('button', { name: 'Добавить место', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Мои места', exact: true })).toBeVisible();
   await expect(page.locator('#travel-panel')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Экспорт|Импорт|Ставить флажки|Закрашивать страны|Город вручную/ })).toHaveCount(0);
-  await expect(page.locator('input[type="file"], input[type="color"], input[type="number"], progress')).toHaveCount(0);
+  await expect(page.locator('input[type="file"], input[type="color"], input[type="number"]')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('casual-home.png') });
   await openSearch(page);
   await expect(page.getByLabel('Страна или город', { exact: true })).toBeFocused();

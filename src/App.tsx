@@ -9,6 +9,8 @@ import {
   MapPin,
   Plus,
   Search,
+  Moon,
+  Sun,
   X,
 } from 'lucide-react';
 import { COUNTRIES, COUNTRY_BY_CODE } from './data/countries';
@@ -17,6 +19,8 @@ import {
   findCityMatch,
   formatCalendarDate,
   getStats,
+  getCountryVisitCount,
+  type TrackerAction,
   latestVisitDate,
 } from './domain/tracker';
 import type { City, InteractionMode, LngLat, PlaceCandidate } from './domain/types';
@@ -28,6 +32,7 @@ import { CityEditor } from './components/CityEditor';
 import { CountryEditor } from './components/CountryEditor';
 import { useViewportLayout } from './hooks/ui/useViewportLayout';
 import { useFocusRestore } from './hooks/ui/useFocusRestore';
+import { useTheme } from './hooks/ui/useTheme';
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'Не удалось выполнить действие.';
@@ -36,6 +41,7 @@ export default function App() {
   const tracker = useTracker();
   const { data, blocked } = tracker;
   const stats = getStats(data);
+  const { theme, toggleTheme } = useTheme();
   const geocoder = useMemo(() => createGeocoder(), []);
   const mapRef = useRef<TravelMapHandle>(null);
 
@@ -61,7 +67,7 @@ export default function App() {
   const draftOriginal = useRef('');
   const [matches, setMatches] = useState<{ candidate: PlaceCandidate; cities: City[] } | null>(null);
   const [distinctCityConfirmed, setDistinctCityConfirmed] = useState(false);
-  const [pendingWrite, setPendingWrite] = useState<'save' | 'delete' | null>(null);
+  const [pendingWrite, setPendingWrite] = useState<'save' | 'delete' | 'country' | null>(null);
   const pendingWriteRef = useRef<typeof pendingWrite>(null);
 
   const countriesTabRef = useRef<HTMLButtonElement>(null);
@@ -245,6 +251,13 @@ export default function App() {
     setPendingWrite(null);
   }
 
+  async function saveCountry(action: TrackerAction) {
+    if (blocked || !beginWrite('country')) return;
+    try { await tracker.commit(action); }
+    catch (err) { setError(messageOf(err)); }
+    finally { finishWrite(); }
+  }
+
   async function saveDraft() {
     if (!draft || pendingWriteRef.current) return;
     if (matches) {
@@ -364,13 +377,15 @@ export default function App() {
           countryCode={country.code}
           countryName={country.name}
           currentColor={data.countryColors[country.code]}
-          disabled={blocked}
+          visitCount={getCountryVisitCount(data, country.code)}
+          disabled={blocked || pendingWrite !== null}
           onSelectColor={(color) => {
-            void tracker.commit({ type: 'colorCountry', code: country.code, color });
+            void saveCountry({ type: 'colorCountry', code: country.code, color });
           }}
           onResetColor={() => {
-            void tracker.commit({ type: 'resetCountry', code: country.code });
+            void saveCountry({ type: 'resetCountry', code: country.code });
           }}
+          onSetVisitCount={count => { void saveCountry({ type: 'setCountryVisits', code: country.code, count }); }}
           onClose={closeCountryEditor}
         />
       );
@@ -496,7 +511,7 @@ export default function App() {
         <span className="country-dot" style={{ background: data.countryColors[item.code] ?? 'var(--line)' }} aria-hidden="true">
           {data.countryColors[item.code] ? <Check size={12} /> : null}
         </span>
-        <span className="place-name">{item.name}</span>
+        <span className="place-name">{item.name}{data.countryColors[item.code] ? <small>{getCountryVisitCount(data, item.code)} {plural(getCountryVisitCount(data, item.code), 'посещение', 'посещения', 'посещений')}</small> : null}</span>
         <ArrowUpRight size={16} className="row-arrow" aria-hidden="true" />
       </button>
     </li>
@@ -505,7 +520,7 @@ export default function App() {
   return (
     <main className="app" data-panel-open={Boolean(activePanel)}>
       <div className="map-stage">
-        <TravelMap ref={mapRef} mode={mode} countryColors={data.countryColors} cities={data.cities}
+        <TravelMap ref={mapRef} theme={theme} mode={mode} countryColors={data.countryColors} cities={data.cities}
           selectedCountryCode={countryCode} selectedCityId={draft?.id ?? null}
           draftCoordinates={draft && !data.cities.some(city => city.id === draft.id) ? validDraftCoordinates : null}
           onCountrySelect={code => selectCountry(code, false, '[data-testid="travel-map"] canvas')}
@@ -522,6 +537,11 @@ export default function App() {
           <h1>Карта<br className="mobile-break" /> путешествий</h1>
         </div>
         <nav className="header-actions" aria-label="Путешествия">
+          <button type="button" className="icon-button theme-toggle" onClick={toggleTheme}
+            aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}>
+            {theme === 'dark' ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
+          </button>
           <button type="button" className="collection-button" data-focus-id="my-places"
             aria-label="Мои места" aria-expanded={panel === 'collection'} aria-controls="travel-panel"
             disabled={pendingWrite !== null} onClick={() => panel === 'collection' ? closePanel() : openPanel('collection')}>
@@ -536,19 +556,28 @@ export default function App() {
       </header>
 
       {!activePanel && mode === 'countries' ? <>
-        {!hasPlaces && !introDismissed ? <section className="map-intro" data-ui-panel={!isMobile ? 'sidebar' : undefined}>
+        {isMobile && !hasPlaces && !introDismissed ? <section className="map-intro">
           <h2>Здесь живут <br />ваши путешествия</h2>
           <p>{'Отметьте страну, в которой были.\nСохраните место, которое хочется помнить.'}</p>
           {!isMobile ? <button className="intro-link" type="button" disabled={blocked} onClick={() => openPanel('search')}>
             {hasPlaces ? 'Куда ещё вы ездили?' : 'Начать с первого места'}<ArrowRight size={18} aria-hidden="true" />
           </button> : null}
         </section> : null}
-        {hasPlaces && !isMobile ? <button className="travel-summary" onClick={() => openPanel('collection')} type="button">
-          <span><strong>{stats.countries}</strong> {plural(stats.countries, 'страна', 'страны', 'стран')}</span>
-          <span className="summary-separator" aria-hidden="true" />
-          <span><strong>{stats.cities}</strong> {plural(stats.cities, 'место', 'места', 'мест')}</span>
-          <ArrowUpRight size={18} aria-hidden="true" />
-        </button> : null}
+        {!isMobile ? <section className="journey-overview" aria-label="Обзор путешествий" data-ui-panel="sidebar">
+          <h2>Мои путешествия</h2>
+          <p className="hint">{hasPlaces ? 'Страны, в которые хочется возвращаться.' : 'Ваша история начинается с первой отметки.'}</p>
+          <dl className="overview-stats">
+            <div><dt>Страны</dt><dd>{stats.countries} <small>из 195</small></dd></div>
+            <div><dt>Места</dt><dd>{stats.cities}</dd></div>
+            <div><dt>Поездки в страны</dt><dd>{stats.countryVisits}</dd></div>
+          </dl>
+          <progress className="overview-progress" max={195} value={stats.countries} aria-label="Посещено стран" />
+          {savedCountries.length ? <><h3>Ваши страны</h3><ul className="place-list overview-list">
+            {[...savedCountries].sort((a, b) => getCountryVisitCount(data, b.code) - getCountryVisitCount(data, a.code)).slice(0, 3).map(countryRow)}
+          </ul><button className="text-button" type="button" onClick={() => openPanel('collection')}>Все мои места<ArrowRight size={18} aria-hidden="true" /></button></> :
+          <button className="text-button" type="button" disabled={blocked} onClick={() => openPanel('search')}>Добавить первую страну<ArrowRight size={18} aria-hidden="true" /></button>}
+          <p className="local-save-note">Сохраняется в этом браузере</p>
+        </section> : null}
       </> : null}
 
       {mode === 'flags' && !draft ? <div className="point-instruction" role="status">
@@ -623,7 +652,7 @@ export default function App() {
       </aside> : null}
 
       {isMobile && !activePanel && mode === 'countries' ? <div className="mobile-dock" data-ui-panel="sheet">
-        <div className="mobile-dock-caption">{hasPlaces ? `${stats.countries} ${plural(stats.countries, 'страна', 'страны', 'стран')} · ${stats.cities} ${plural(stats.cities, 'место', 'места', 'мест')}` : 'Каждое путешествие — часть вашей истории'}</div>
+        <div className="mobile-dock-caption">{`${stats.countries} ${plural(stats.countries, 'страна', 'страны', 'стран')} · ${stats.cities} ${plural(stats.cities, 'место', 'места', 'мест')} · ${stats.countryVisits} ${plural(stats.countryVisits, 'поездка', 'поездки', 'поездок')}`}</div>
         <button type="button" className="primary wide" data-focus-id="add-place" disabled={blocked || pendingWrite !== null} onClick={() => openPanel('search')}><Plus size={20} aria-hidden="true" />Добавить место</button>
       </div> : null}
 

@@ -21,7 +21,7 @@ const findings = [];
 
 async function assertSimpleUI(page) {
   await expect(page.getByRole('button', { name: /экспорт|импорт|json/i })).toHaveCount(0);
-  await expect(page.locator('input[type="file"], input[type="color"]')).toHaveCount(0);
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
   await expect(page.getByLabel(/Долгота|Широта/)).toHaveCount(0);
   expect(await page.locator('body').innerText()).not.toMatch(/экспорт|импорт|JSON/i);
 }

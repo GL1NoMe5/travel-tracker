@@ -10,10 +10,25 @@ describe('snapshots and backups', () => {
   it('round-trips multiple visits and colors', () => {
     const city = createCity({ name: 'Алматы', displayName: 'Алматы', coordinates: [76.9, 43.2] });
     city.visits.push({ ...createVisit(), date: '2025-12-31', note: 'Горы <script>text</script>' });
-    const data = { ...createEmptyData(), countryColors: { KZ: '#46A88C' }, cities: [city] };
+    const data = { ...createEmptyData(), countryColors: { KZ: '#46A88C' }, countryVisits: { KZ: 3 }, cities: [city] };
     const store = memory(); persistTracker(store, data);
     expect(loadTracker(store).data).toEqual(data);
     expect(parseBackup(serializeBackup(data))).toEqual(data);
+  });
+  it('loads legacy countries with one visit without rewriting their stored snapshot', () => {
+    const raw = JSON.stringify({ schemaVersion: 1, countryColors: { KG: '#46A88C' }, cities: [] });
+    const store = memory(raw);
+    const loaded = loadTracker(store);
+    expect(loaded.kind).toBe('ok');
+    expect(loaded.data.countryVisits).toEqual({ KG: 1 });
+    expect(loaded.raw).toBe(raw);
+    expect(store.getItem(STORAGE_KEY)).toBe(raw);
+  });
+  it('leaves invalid country visit counts untouched instead of silently resetting them', () => {
+    const raw = JSON.stringify({ schemaVersion: 1, countryColors: { KG: '#46A88C' }, countryVisits: { KG: -3 }, cities: [] });
+    const store = memory(raw);
+    expect(loadTracker(store).kind).toBe('corrupt');
+    expect(store.getItem(STORAGE_KEY)).toBe(raw);
   });
   it('does not overwrite corrupt JSON when loading', () => {
     const store = memory('{broken');

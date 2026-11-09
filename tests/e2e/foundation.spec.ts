@@ -75,7 +75,7 @@ test('corrupt data is preserved until confirmed recovery and backed up before re
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Начать заново', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  expect(await persisted(page)).toEqual({ schemaVersion: 1, countryColors: {}, cities: [] });
+  expect(await persisted(page)).toEqual({ schemaVersion: 1, countryColors: {}, countryVisits: {}, cities: [] });
   const recoveryCopies = await page.evaluate(() => Object.entries(localStorage)
     .filter(([key]) => key.startsWith('travel-tracker:recovery:')));
   expect(recoveryCopies).toHaveLength(1);

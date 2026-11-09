@@ -50,6 +50,7 @@ import {
   resolveVisibleSurfacePoint,
 } from './helpers';
 import { measureDomViewportPadding, observeUiPanels } from './layout';
+import { createMapThemeController } from './theme';
 import './map.css';
 
 setWorkerUrl(maplibreWorkerUrl);
@@ -267,6 +268,7 @@ function deduplicateCities(cities: readonly City[]): City[] {
 
 export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function TravelMap(
   {
+    theme = 'light',
     mode,
     countryColors,
     selectedCountryCode,
@@ -284,6 +286,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const styleReadyRef = useRef(false);
+  const applyThemeRef = useRef<ReturnType<typeof createMapThemeController> | null>(null);
   const fatalErrorRef = useRef(false);
   const overviewRef = useRef(true);
   const cameraFrameRef = useRef<number | null>(null);
@@ -298,6 +301,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
   const [retryCount, setRetryCount] = useState(0);
 
   const propsRef = useRef({
+    theme,
     mode,
     countryColors,
     selectedCountryCode,
@@ -311,6 +315,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
   });
 
   propsRef.current = {
+    theme,
     mode,
     countryColors,
     selectedCountryCode,
@@ -592,6 +597,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     if (!container) return;
 
     styleReadyRef.current = false;
+    applyThemeRef.current = null;
     fatalErrorRef.current = false;
     reportStatus({ kind: 'loading' });
 
@@ -709,6 +715,8 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       try {
         map.setProjection(GLOBE_TO_MERCATOR_PROJECTION);
         applyRussianLabelsToStyle(map);
+        applyThemeRef.current = createMapThemeController(map);
+        applyThemeRef.current(propsRef.current.theme);
         ensureCountrySourceAndLayers(
           map,
           propsRef.current.countryColors,
@@ -974,6 +982,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       }
 
       styleReadyRef.current = false;
+      applyThemeRef.current = null;
       mapRef.current = null;
       if (rootRef.current) {
         delete (rootRef.current as HTMLDivElement & { __travelMap?: MapLibreMap }).__travelMap;
@@ -989,6 +998,10 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     syncDraftMarker,
     syncMarkersOcclusion,
   ]);
+
+  useEffect(() => {
+    applyThemeRef.current?.(theme);
+  }, [theme]);
 
   useEffect(() => {
     const map = mapRef.current;

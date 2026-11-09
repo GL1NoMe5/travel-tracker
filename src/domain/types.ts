@@ -34,6 +34,8 @@ export interface PlaceCandidate {
 export interface TrackerData {
   schemaVersion: 1;
   countryColors: Record<string, string>;
+  /** Missing in older v1 snapshots; each marked country then means one visit. */
+  countryVisits?: Record<string, number>;
   cities: City[];
 }
 

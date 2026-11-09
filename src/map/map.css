@@ -291,3 +291,18 @@
 .travel-map__marker--draft .travel-map__marker-pin { background: #c45b3d; box-shadow: 0 4px 12px #28313235; }
 .travel-map__marker-pin { border-radius: 50% 50% 50% 4px; }
 .travel-map .maplibregl-ctrl-attrib { border: 0; border-radius: 4px; background: #f5f5f2e6 !important; }
+
+.travel-map__control-btn,
+.travel-map__status-pill,
+.travel-map__error-card { background: var(--surface, #fff); border-color: var(--line, #dce0dc); color: var(--ink, #283132); }
+.travel-map__control-btn:hover:not(:disabled) { background: var(--wash, #f1f3ef); border-color: var(--line, #dce0dc); color: var(--accent, #b9492f); }
+.travel-map__error-title { color: var(--ink, #283132); }
+.travel-map__error-text, .travel-map__status-pill { color: var(--secondary, #616b6b); }
+.travel-map .maplibregl-ctrl-attrib { background: var(--paper, #f5f5f2) !important; color: var(--secondary, #616b6b) !important; }
+.travel-map .maplibregl-ctrl-attrib a { color: var(--ink, #283132) !important; }
+.travel-map__control-btn:focus-visible,
+.travel-map .maplibregl-canvas:focus-visible,
+.travel-map__marker:focus-visible .travel-map__marker-pin { outline-color: var(--accent, #b9492f); }
+:root[data-theme='dark'] .travel-map__marker-pin { border-color: #ecded4; background: #b9492f; }
+:root[data-theme='dark'] .travel-map__marker--selected .travel-map__marker-pin { border-color: #fff; box-shadow: 0 4px 12px #0008; }
+:root[data-theme='dark'] .travel-map__marker--draft .travel-map__marker-pin { background: #c45b3d; border-color: #ffe4cb; }
