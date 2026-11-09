@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="100%" height="100%">
+  <defs>
+    <filter id="cardShadow" x="-4%" y="-6%" width="108%" height="116%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#191816" flood-opacity="0.04"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="320" rx="20" fill="#F5F5F2"/>
+
+  <!-- Row 1, Col 1 -->
+  <g transform="translate(24, 24)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">Карта на первом месте</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">Глобус занимает всё окно, а поиск и дневник</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">открываются компактной карточкой поверх</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">только тогда, когда они нужны.</text>
+  </g>
+
+  <!-- Row 1, Col 2 -->
+  <g transform="translate(416, 24)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">195 стран без внешних ключей</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">Каталог и геометрия всех государств ООН</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">вместе с заморскими территориями встроены</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">локально и работают мгновенно.</text>
+  </g>
+
+  <!-- Row 1, Col 3 -->
+  <g transform="translate(808, 24)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">Бережный поиск городов</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">Запросы к Nominatim уходят только по Enter</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">или кнопке, с синхронизацией частоты</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">между вкладками через Web Locks.</text>
+  </g>
+
+  <!-- Row 2, Col 1 -->
+  <g transform="translate(24, 170)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">История повторных поездок</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">Несколько визитов в один город не плодят</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">дубликаты на карте, а складываются</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">в хронологию «Прошлые поездки».</text>
+  </g>
+
+  <!-- Row 2, Col 2 -->
+  <g transform="translate(416, 170)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">Сохранность при сбоях</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">При нехватке места в localStorage или</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">повреждении JSON старая версия бережно</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">откладывается в резервный ключ.</text>
+  </g>
+
+  <!-- Row 2, Col 3 -->
+  <g transform="translate(808, 170)" filter="url(#cardShadow)">
+    <rect width="368" height="126" rx="14" fill="#FFFFFF" stroke="#E4E4DF" stroke-width="1"/>
+    <circle cx="34" cy="36" r="14" fill="#FDF3F0"/>
+    <circle cx="34" cy="36" r="5" fill="#B9492F"/>
+    <text x="58" y="41" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" fill="#283132">Windows без консоли</text>
+    <text x="24" y="72" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">Установщик Setup.exe создаёт ярлыки</text>
+    <text x="24" y="92" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">и запускает приложение в фоновом режиме</text>
+    <text x="24" y="112" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13.5" fill="#5F6868">с управлением через значок в трее.</text>
+  </g>
+</svg>

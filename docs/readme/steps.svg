@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="248" viewBox="0 0 960 248" role="img" aria-labelledby="t d">
+  <title id="t">Как это работает</title>
+  <desc id="d">Четыре шага: 01 Найдите, 02 Отметьте, 03 Запишите, 04 Вернитесь.</desc>
+  <style>
+    .card { fill: #ffffff; stroke: #dce0dc; }
+    .num { font: 600 13px Manrope, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; fill: #b9492f; letter-spacing: 1.5px; }
+    .title { font: 600 21px Manrope, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; fill: #283132; }
+    .text { font: 400 13.5px Manrope, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; fill: #616b6b; }
+    .icon { fill: none; stroke: #b9492f; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .dot { fill: #f3d8cf; }
+    .rail { stroke: #e3b8aa; stroke-width: 1.5; stroke-dasharray: 2 5; stroke-linecap: round; }
+  </style>
+  <rect width="960" height="248" rx="20" fill="#f5f5f2"/>
+
+  <line class="rail" x1="96" y1="68" x2="864" y2="68"/>
+
+  <!-- 01 -->
+  <g transform="translate(24 24)">
+    <rect class="card" x="0.5" y="0.5" width="207" height="199" rx="14"/>
+    <circle class="dot" cx="44" cy="44" r="22"/>
+    <g class="icon" transform="translate(32 32)"><circle cx="10.5" cy="10.5" r="7"/><path d="M16 16l6 6"/></g>
+    <text class="num" x="78" y="49">01</text>
+    <text class="title" x="22" y="106">Найдите</text>
+    <text class="text" x="22" y="134">Страну — сразу в каталоге</text>
+    <text class="text" x="22" y="155">из 195. Город — по Enter</text>
+    <text class="text" x="22" y="176">или прямо на карте.</text>
+  </g>
+
+  <!-- 02 -->
+  <g transform="translate(260 24)">
+    <rect class="card" x="0.5" y="0.5" width="207" height="199" rx="14"/>
+    <circle class="dot" cx="44" cy="44" r="22"/>
+    <g class="icon" transform="translate(33 32)"><path d="M4 22V4"/><path d="M4 4h13l-3 4.5 3 4.5H4"/></g>
+    <text class="num" x="78" y="49">02</text>
+    <text class="title" x="22" y="106">Отметьте</text>
+    <text class="text" x="22" y="134">«Я здесь был» закрашивает</text>
+    <text class="text" x="22" y="155">страну, флажок ставит</text>
+    <text class="text" x="22" y="176">город на глобусе.</text>
+  </g>
+
+  <!-- 03 -->
+  <g transform="translate(496 24)">
+    <rect class="card" x="0.5" y="0.5" width="207" height="199" rx="14"/>
+    <circle class="dot" cx="44" cy="44" r="22"/>
+    <g class="icon" transform="translate(32 32)"><path d="M15.5 4.5l4 4L9 19H5v-4z"/><path d="M13 7l4 4"/></g>
+    <text class="num" x="78" y="49">03</text>
+    <text class="title" x="22" y="106">Запишите</text>
+    <text class="text" x="22" y="134">Дата и заметка — по</text>
+    <text class="text" x="22" y="155">желанию. В одном городе</text>
+    <text class="text" x="22" y="176">может быть много поездок.</text>
+  </g>
+
+  <!-- 04 -->
+  <g transform="translate(732 24)">
+    <rect class="card" x="0.5" y="0.5" width="203" height="199" rx="14"/>
+    <circle class="dot" cx="44" cy="44" r="22"/>
+    <g class="icon" transform="translate(32 32)"><path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H10a2 2 0 0 1 2 2v14a1.5 1.5 0 0 0-1.5-1.5H3z"/><path d="M21 5.5A1.5 1.5 0 0 0 19.5 4H14a2 2 0 0 0-2 2v14a1.5 1.5 0 0 1 1.5-1.5H21z"/></g>
+    <text class="num" x="78" y="49">04</text>
+    <text class="title" x="22" y="106">Вернитесь</text>
+    <text class="text" x="22" y="134">«Мои места» хранят всё,</text>
+    <text class="text" x="22" y="155">что вы отметили. Один</text>
+    <text class="text" x="22" y="176">клик — и карта уже там.</text>
+  </g>
+</svg>
