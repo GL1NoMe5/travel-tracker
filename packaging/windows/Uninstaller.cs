@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
@@ -45,7 +47,8 @@ namespace TravelTracker.Uninstall
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return 0;
                 }
                 EnsureLauncherClosed(expected);
-                StartCleanup(expected, silent);
+                List<ShortcutSnapshot> shortcuts = CaptureOwnedShortcuts(expected);
+                StartCleanup(expected, silent, shortcuts);
                 return 0;
             }
             catch (Exception error)
@@ -158,14 +161,63 @@ namespace TravelTracker.Uninstall
 
         private static string QuotePowerShell(string value) { return "'" + value.Replace("'", "''") + "'"; }
 
-        private static void StartCleanup(string directory, bool silent)
+        private sealed class ShortcutSnapshot
+        {
+            internal string Path;
+            internal string Hash;
+        }
+
+        private static List<ShortcutSnapshot> CaptureOwnedShortcuts(string directory)
+        {
+            List<ShortcutSnapshot> snapshots = new List<ShortcutSnapshot>();
+            string launcher = Path.Combine(directory, "TravelTracker.exe");
+            foreach (Environment.SpecialFolder folder in new Environment.SpecialFolder[] {
+                Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.Programs })
+            {
+                string parent = Environment.GetFolderPath(folder);
+                if (String.IsNullOrEmpty(parent)) continue;
+                string path = Path.GetFullPath(Path.Combine(parent, DisplayName + ".lnk"));
+                ShortcutSnapshot snapshot = ReadOwnedShortcutSnapshot(path, launcher);
+                if (snapshot != null) snapshots.Add(snapshot);
+            }
+            return snapshots;
+        }
+
+        private static ShortcutSnapshot ReadOwnedShortcutSnapshot(string path, string launcher)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                EnsureNoReparseAncestors(path);
+                // Deny modification and deletion while target ownership and bytes are read.
+                using (FileStream file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    string target = TravelTracker.Windows.ShellLinks.ReadTarget(path);
+                    if (String.IsNullOrEmpty(target) || !Path.IsPathRooted(target) ||
+                        !String.Equals(Path.GetFullPath(target), launcher, StringComparison.OrdinalIgnoreCase)) return null;
+                    using (SHA256 hash = SHA256.Create())
+                        return new ShortcutSnapshot { Path = path, Hash = BitConverter.ToString(hash.ComputeHash(file)).Replace("-", "") };
+                }
+            }
+            // An unreadable, changed or foreign shortcut does not belong to this cleanup.
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (ArgumentException) { return null; }
+            catch (COMException) { return null; }
+        }
+
+        private static void StartCleanup(string directory, bool silent, IEnumerable<ShortcutSnapshot> shortcuts)
         {
             // A hidden, in-memory helper waits for this executable to exit before deleting it.
             // It repeats the identity, canonical path and reparse checks immediately before removal.
+            StringBuilder shortcutData = new StringBuilder("$ownedShortcuts = @(\r\n");
+            foreach (ShortcutSnapshot shortcut in shortcuts)
+                shortcutData.Append("@{ Path = ").Append(QuotePowerShell(shortcut.Path)).Append("; Hash = ").Append(QuotePowerShell(shortcut.Hash)).Append(" }\r\n");
+            shortcutData.Append(")\r\n");
             string script = "$ErrorActionPreference = 'Stop'\r\n" +
                 "$requested = " + QuotePowerShell(directory) + "\r\n" +
                 "$ownerProcessId = " + Process.GetCurrentProcess().Id + "\r\n" +
-                "$quiet = " + (silent ? "$true" : "$false") + "\r\n" + CleanupScript;
+                "$quiet = " + (silent ? "$true" : "$false") + "\r\n" + shortcutData + CleanupScript;
             string powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
             ProcessStartInfo start = new ProcessStartInfo(powershell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(script)))
             {
@@ -294,18 +346,22 @@ try {
             if (@([IO.Directory]::EnumerateFileSystemEntries($folder)).Count -eq 0) { Remove-Item -LiteralPath $folder -Force }
         }
     }
-    $shell = New-Object -ComObject WScript.Shell
-    try {
-        foreach ($shortcutFolder in @([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory), [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs))) {
-            $shortcutPath = [IO.Path]::Combine($shortcutFolder, 'Карта путешествий.lnk')
-            if ([IO.File]::Exists($shortcutPath) -and (([IO.File]::GetAttributes($shortcutPath) -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
-                $shortcut = $shell.CreateShortcut($shortcutPath)
-                try {
-                    if ([String]::Equals($shortcut.TargetPath, $launcher, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $shortcutPath -Force }
-                } finally { [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) }
-            }
-        }
-    } finally { [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    foreach ($snapshot in $ownedShortcuts) {
+        $shortcutPath = [string] $snapshot.Path
+        if (-not [IO.File]::Exists($shortcutPath)) { continue }
+        try {
+            Assert-NoRedirect $shortcutPath
+            $hash = [Security.Cryptography.SHA256]::Create()
+            try {
+                $stream = [IO.File]::Open($shortcutPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                try { $actualHash = [BitConverter]::ToString($hash.ComputeHash($stream)).Replace('-', '') }
+                finally { $stream.Dispose() }
+            } finally { $hash.Dispose() }
+            if ($actualHash -cne [string] $snapshot.Hash) { continue }
+            Assert-NoRedirect $shortcutPath
+        } catch { continue }
+        Remove-Item -LiteralPath $shortcutPath -Force
+    }
     if (-not [String]::Equals((Get-RegisteredDirectory), $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Запись установки изменилась. Удаление отменено.' }
     [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($registryPath, $false)
     foreach ($file in $lastFiles) {

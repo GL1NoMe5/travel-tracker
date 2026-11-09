@@ -6,12 +6,12 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using TravelTracker.Windows;
 
 namespace TravelTracker.Setup
 {
@@ -381,37 +381,15 @@ namespace TravelTracker.Setup
             yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), DisplayName + ".lnk");
         }
 
-        private static object CreateShell() { return Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", true)); }
-        private static object GetShortcut(object shell, string path) { return shell.GetType().InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { path }); }
-        private static void SetProperty(object value, string name, object property) { value.GetType().InvokeMember(name, BindingFlags.SetProperty, null, value, new object[] { property }); }
-
         private static string ShortcutTarget(string path)
         {
-            object shell = null, shortcut = null;
-            try
-            {
-                shell = CreateShell(); shortcut = GetShortcut(shell, path);
-                return Convert.ToString(shortcut.GetType().InvokeMember("TargetPath", BindingFlags.GetProperty, null, shortcut, null));
-            }
-            finally { if (shortcut != null) Marshal.FinalReleaseComObject(shortcut); if (shell != null) Marshal.FinalReleaseComObject(shell); }
+            return ShellLinks.ReadTarget(path);
         }
 
         private static void WriteShortcut(string path, string directory)
         {
-            object shell = null, shortcut = null;
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
-                shell = CreateShell(); shortcut = GetShortcut(shell, path);
-                string executable = Path.Combine(directory, "TravelTracker.exe");
-                SetProperty(shortcut, "TargetPath", executable);
-                SetProperty(shortcut, "WorkingDirectory", directory);
-                SetProperty(shortcut, "Arguments", "");
-                SetProperty(shortcut, "IconLocation", executable + ",0");
-                SetProperty(shortcut, "Description", DisplayName);
-                shortcut.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            }
-            finally { if (shortcut != null) Marshal.FinalReleaseComObject(shortcut); if (shell != null) Marshal.FinalReleaseComObject(shell); }
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            ShellLinks.Write(path, Path.Combine(directory, "TravelTracker.exe"), directory, DisplayName);
         }
 
         private sealed class ShortcutBackup

@@ -37,6 +37,8 @@ $testJunction = Join-Path $testRoot 'linked-install'
 $processCount = 0
 $checks = 0
 $lastProcessError = ''
+$shortcutReadTarget = $null
+$shortcutReadWorkingDirectory = $null
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (!$Condition) {
@@ -136,18 +138,37 @@ function Assert-Payload([string]$Directory) {
     Assert-True ($packagedCount -eq $sourceFiles.Count) "All $($sourceFiles.Count) packaged production files match dist hashes exactly"
 }
 
-function Assert-ShortcutsAndRegistry {
-    $shell = New-Object -ComObject WScript.Shell
-    try {
-        foreach ($path in $shortcutPaths) {
-            Assert-True ([IO.File]::Exists($path)) "Shortcut exists: $path"
-            $shortcut = $shell.CreateShortcut($path)
-            try {
-                Assert-True ([string]::Equals([IO.Path]::GetFullPath($shortcut.TargetPath), $launcherPath, [StringComparison]::OrdinalIgnoreCase)) 'Shortcut points to the installed launcher'
-                Assert-True ([string]::Equals([IO.Path]::GetFullPath($shortcut.WorkingDirectory), $installRoot, [StringComparison]::OrdinalIgnoreCase)) 'Shortcut working directory matches'
-            } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) }
+function Read-UnicodeShortcut([string]$Path) {
+    if ($null -eq $script:shortcutReadTarget) {
+        # Load the production helper from bytes: inspection must not lock Setup,
+        # the installed uninstaller, or extracted files needed during cleanup.
+        $assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($setup))
+        $helpers = @($assembly.GetTypes() | Where-Object { $_.Name -ceq 'ShellLinks' })
+        Assert-True ($helpers.Count -eq 1) 'Setup contains one shared Unicode shortcut helper'
+        $flags = [Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::Public -bor [Reflection.BindingFlags]::NonPublic
+        $script:shortcutReadTarget = $helpers[0].GetMethod('ReadTarget', $flags)
+        $script:shortcutReadWorkingDirectory = $helpers[0].GetMethod('ReadWorkingDirectory', $flags)
+        if ($null -eq $script:shortcutReadTarget -or $null -eq $script:shortcutReadWorkingDirectory) {
+            throw 'Setup is missing its Unicode shortcut inspection methods.'
         }
-    } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    }
+    return [pscustomobject]@{
+        TargetPath = [string]$script:shortcutReadTarget.Invoke($null, [object[]]@($Path))
+        WorkingDirectory = [string]$script:shortcutReadWorkingDirectory.Invoke($null, [object[]]@($Path))
+    }
+}
+
+function Assert-ShortcutsAndRegistry {
+    foreach ($path in $shortcutPaths) {
+        Assert-True ([IO.File]::Exists($path)) "Shortcut exists: $path"
+        $matchingNames = @([IO.Directory]::EnumerateFiles([IO.Path]::GetDirectoryName($path), '*.lnk') | Where-Object {
+            [IO.Path]::GetFileName($_) -ceq ($displayName + '.lnk')
+        })
+        Assert-True ($matchingNames.Count -eq 1) 'Shortcut retains its exact Russian filename'
+        $shortcut = Read-UnicodeShortcut $path
+        Assert-True ([string]::Equals([IO.Path]::GetFullPath($shortcut.TargetPath), $launcherPath, [StringComparison]::OrdinalIgnoreCase)) 'Shortcut points to the installed launcher'
+        Assert-True ([string]::Equals([IO.Path]::GetFullPath($shortcut.WorkingDirectory), $installRoot, [StringComparison]::OrdinalIgnoreCase)) 'Shortcut working directory matches'
+    }
     $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registryPath)
     Assert-True ($null -ne $key) 'Windows uninstall registration exists'
     try {

@@ -54,7 +54,11 @@ function Invoke-Compiler([string]$Source, [string]$Output, [string[]]$Extra = @(
     ('/out:' + $Output), ('/win32manifest:' + (Join-Path $projectRoot 'packaging/windows/app.manifest')),
     ('/win32icon:' + (Join-Path $buildRoot 'app.ico')), '/reference:System.Windows.Forms.dll',
     '/reference:System.Drawing.dll', '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll')
-  & $compiler @compilerArguments @Extra (Join-Path $projectRoot $Source) (Join-Path $buildRoot 'VersionInfo.cs')
+  $compilerSources = @((Join-Path $projectRoot $Source), (Join-Path $buildRoot 'VersionInfo.cs'))
+  if ($Source -ne 'packaging/windows/Launcher.cs') {
+    $compilerSources += Join-Path $projectRoot 'packaging/windows/ShellLinks.cs'
+  }
+  & $compiler @compilerArguments @Extra @compilerSources
   if ($LASTEXITCODE -ne 0) { throw "Compiler failed for $Source (exit $LASTEXITCODE)." }
 }
 
