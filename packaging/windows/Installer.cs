@@ -34,10 +34,15 @@ namespace TravelTracker.Setup
                 }
                 if (args.Length == 1 && args[0] == "--silent")
                 {
-                    Install();
+                    Install(InstallDirectory);
                     return 0;
                 }
-                if (args.Length != 0) throw new ArgumentException("Допустимые параметры: --silent или --extract <папка>.");
+                if (args.Length == 3 && args[0] == "--silent" && args[1] == "--directory")
+                {
+                    Install(args[2]);
+                    return 0;
+                }
+                if (args.Length != 0) throw new ArgumentException("Допустимые параметры: --silent [--directory <полный путь>] или --extract <папка>.");
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 using (SetupForm form = new SetupForm()) Application.Run(form);
@@ -55,10 +60,83 @@ namespace TravelTracker.Setup
         {
             get
             {
+                string registered = ReadRegisteredDirectory();
+                if (registered != null) return registered;
                 string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 if (String.IsNullOrWhiteSpace(local)) throw new IOException("Не удалось найти папку приложений пользователя.");
-                return Path.GetFullPath(Path.Combine(local, "Programs", "TravelTracker"));
+                return ValidateInstallDirectory(Path.Combine(local, "Programs", "TravelTracker"));
             }
+        }
+
+        private static string ReadRegisteredDirectory()
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryPath))
+            {
+                if (key == null) return null;
+                string directory = key.GetValue("InstallLocation", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                if (String.IsNullOrWhiteSpace(directory)) throw new IOException("Запись прежней установки повреждена. Сначала удалите прежнюю версию через параметры Windows.");
+                return ValidateInstallDirectory(directory);
+            }
+        }
+
+        private static string ValidateInstallDirectory(string directory)
+        {
+            if (String.IsNullOrWhiteSpace(directory) || directory.Length < 3 ||
+                !((directory[0] >= 'A' && directory[0] <= 'Z') || (directory[0] >= 'a' && directory[0] <= 'z')) ||
+                directory[1] != ':' || (directory[2] != '\\' && directory[2] != '/'))
+                throw new IOException("Укажите полный путь к папке на локальном диске, например D:\\Программы\\TravelTracker.");
+            string normalized = directory.Replace('/', '\\');
+            if (normalized.Length > 3 && normalized.EndsWith("\\", StringComparison.Ordinal)) normalized = normalized.Substring(0, normalized.Length - 1);
+            if (normalized.Length <= 3) throw new IOException("Выберите отдельную папку приложения, а не корень диска.");
+            try { ValidateRelativePath(normalized.Substring(3)); }
+            catch (InvalidDataException error) { throw new IOException("В пути папки есть недопустимые символы или названия. Выберите другую папку.", error); }
+            string target = Path.GetFullPath(normalized).TrimEnd(Path.DirectorySeparatorChar);
+            string root = Path.GetPathRoot(target);
+            DriveInfo drive = new DriveInfo(root);
+            if (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable && drive.DriveType != DriveType.Ram)
+                throw new IOException("Выберите папку на доступном локальном диске.");
+            if (!drive.IsReady) throw new IOException("Выбранный диск недоступен. Подключите его или выберите другую папку.");
+
+            string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            if (!String.IsNullOrEmpty(windows) && IsSameOrChild(target, Path.GetFullPath(windows)))
+                throw new IOException("В системную папку Windows устанавливать приложение нельзя. Выберите другую папку.");
+            Environment.SpecialFolder[] protectedRoots = new Environment.SpecialFolder[] {
+                Environment.SpecialFolder.UserProfile, Environment.SpecialFolder.LocalApplicationData,
+                Environment.SpecialFolder.ApplicationData, Environment.SpecialFolder.CommonApplicationData,
+                Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86,
+                Environment.SpecialFolder.CommonProgramFiles, Environment.SpecialFolder.CommonProgramFilesX86,
+                Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.MyDocuments,
+                Environment.SpecialFolder.MyMusic, Environment.SpecialFolder.MyPictures, Environment.SpecialFolder.MyVideos,
+                Environment.SpecialFolder.Programs, Environment.SpecialFolder.StartMenu, Environment.SpecialFolder.Startup,
+                Environment.SpecialFolder.CommonDesktopDirectory, Environment.SpecialFolder.CommonDocuments,
+                Environment.SpecialFolder.CommonPrograms, Environment.SpecialFolder.CommonStartMenu, Environment.SpecialFolder.CommonStartup
+            };
+            foreach (Environment.SpecialFolder special in protectedRoots)
+            {
+                string protectedRoot = Environment.GetFolderPath(special);
+                if (!String.IsNullOrEmpty(protectedRoot) && String.Equals(target, Path.GetFullPath(protectedRoot).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Выберите отдельную папку приложения внутри выбранной папки.");
+            }
+            string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!String.IsNullOrEmpty(profile) && String.Equals(target, Path.GetDirectoryName(Path.GetFullPath(profile)), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Выберите отдельную папку приложения, а не общую папку пользователей.");
+            string setup = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
+            if (IsSameOrChild(setup, target))
+                throw new IOException("Установщик находится внутри выбранной папки. Переместите Setup.exe в другую папку и запустите его снова.");
+            EnsureNoReparseAncestors(target);
+            string current = target;
+            while (!String.IsNullOrEmpty(current))
+            {
+                if (File.Exists(current)) throw new IOException("Путь установки занят файлом. Выберите другую папку.");
+                current = Path.GetDirectoryName(current);
+            }
+            return target;
+        }
+
+        private static bool IsSameOrChild(string candidate, string parent)
+        {
+            string prefix = parent.TrimEnd(Path.DirectorySeparatorChar);
+            return String.Equals(candidate, prefix, StringComparison.OrdinalIgnoreCase) || candidate.StartsWith(prefix + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ExtractForInspection(string requestedDirectory)
@@ -73,7 +151,7 @@ namespace TravelTracker.Setup
             ExtractPayload(target);
         }
 
-        internal static void Install()
+        internal static void Install(string directory)
         {
             using (Mutex operation = new Mutex(false, @"Local\TravelTracker.Install." + WindowsIdentity.GetCurrent().User.Value))
             {
@@ -81,19 +159,17 @@ namespace TravelTracker.Setup
                 try { acquired = operation.WaitOne(0); }
                 catch (AbandonedMutexException) { acquired = true; }
                 if (!acquired) throw new IOException("Установка или удаление уже выполняется. Дождитесь завершения и попробуйте ещё раз.");
-                try { InstallUnderLock(); }
+                try { InstallUnderLock(ValidateInstallDirectory(directory)); }
+                catch (UnauthorizedAccessException error) { throw new IOException("Нет доступа к выбранной папке. Выберите папку, доступную для записи.", error); }
                 finally { operation.ReleaseMutex(); }
             }
         }
 
-        private static void InstallUnderLock()
+        private static void InstallUnderLock(string target)
         {
-            string target = InstallDirectory;
             string parent = Path.GetDirectoryName(target);
-            EnsureNoReparseAncestors(target);
-            Directory.CreateDirectory(parent);
-            if (File.Exists(target)) throw new IOException("Путь установки занят файлом.");
-            bool hadPrevious = Directory.Exists(target);
+            bool hadDirectory = Directory.Exists(target);
+            bool hadPrevious = hadDirectory && Directory.EnumerateFileSystemEntries(target).Any();
             if (hadPrevious)
             {
                 ValidateInstalledDirectory(target);
@@ -106,15 +182,18 @@ namespace TravelTracker.Setup
             bool installedNew = false;
             List<ShortcutBackup> shortcuts = new List<ShortcutBackup>();
             RegistryBackup registry = RegistryBackup.Capture(target);
+            Directory.CreateDirectory(parent);
             Directory.CreateDirectory(stage);
             try
             {
                 ExtractPayload(stage);
                 if (hadPrevious) PreserveUntrackedFiles(target, stage);
                 foreach (string shortcut in ShortcutPaths()) shortcuts.Add(ShortcutBackup.Capture(shortcut, target));
-                if (hadPrevious)
+                if (hadDirectory)
                 {
-                    EnsureLauncherClosed(target);
+                    EnsureNoReparseTree(target);
+                    if (hadPrevious) EnsureLauncherClosed(target);
+                    else if (Directory.EnumerateFileSystemEntries(target).Any()) throw new IOException("Выбранная папка больше не пуста. Выберите пустую папку приложения.");
                     Directory.Move(target, backup);
                     movedPrevious = true;
                 }
@@ -380,7 +459,10 @@ namespace TravelTracker.Setup
                 {
                     if (key == null) return result;
                     result.existed = true;
-                    if (!String.Equals(Convert.ToString(key.GetValue("InstallLocation")), directory, StringComparison.OrdinalIgnoreCase)) throw new IOException("Запись установки принадлежит другой папке. Приложение не изменено.");
+                    string registered = key.GetValue("InstallLocation", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                    if (String.IsNullOrWhiteSpace(registered)) throw new IOException("Запись прежней установки повреждена. Сначала удалите прежнюю версию через параметры Windows.");
+                    if (!String.Equals(ValidateInstallDirectory(registered), directory, StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("Приложение уже установлено в другой папке: " + registered + "\nЧтобы изменить папку, сначала удалите прежнюю версию через параметры Windows, затем повторите установку.");
                     foreach (string name in key.GetValueNames()) { result.values.Add(name, key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames)); result.kinds.Add(name, key.GetValueKind(name)); }
                 }
                 return result;
@@ -399,13 +481,15 @@ namespace TravelTracker.Setup
         private sealed class SetupForm : Form
         {
             private readonly Button installButton = new Button();
+            private readonly Button browseButton = new Button();
+            private readonly TextBox location = new TextBox();
             private readonly CheckBox launch = new CheckBox();
             private readonly Label status = new Label();
             private bool working;
             internal SetupForm()
             {
                 Text = DisplayName + " — установка";
-                ClientSize = new Size(520, 300);
+                ClientSize = new Size(520, 322);
                 Font = new Font("Segoe UI", 10F);
                 FormBorderStyle = FormBorderStyle.FixedDialog;
                 MaximizeBox = false; MinimizeBox = false; StartPosition = FormStartPosition.CenterScreen;
@@ -414,32 +498,66 @@ namespace TravelTracker.Setup
                 Label title = new Label { Text = DisplayName, Font = new Font("Segoe UI", 21F, FontStyle.Regular), AutoSize = false, Location = new Point(28, 22), Size = new Size(464, 44) };
                 Label description = new Label { Text = "Ваши страны, места и воспоминания — на одной карте.\nПриложение откроется в вашем браузере.", Location = new Point(28, 80), Size = new Size(464, 48) };
                 Label folder = new Label { Text = "Папка установки", Location = new Point(28, 144), Size = new Size(464, 22) };
-                TextBox location = new TextBox { Text = InstallDirectory, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = BackColor, Location = new Point(28, 170), Size = new Size(464, 24) };
-                launch.Text = "Открыть приложение после установки"; launch.Checked = true; launch.Location = new Point(28, 212); launch.Size = new Size(300, 28);
-                installButton.Text = "Установить"; installButton.Location = new Point(356, 214); installButton.Size = new Size(136, 42); installButton.BackColor = Color.FromArgb(185, 73, 47); installButton.ForeColor = Color.White; installButton.FlatStyle = FlatStyle.Flat; installButton.FlatAppearance.BorderSize = 0;
+                location.Text = InstallDirectory; location.Location = new Point(28, 174); location.Size = new Size(354, 28); location.TabIndex = 0; location.AccessibleName = "Папка установки";
+                browseButton.Text = "Обзор…"; browseButton.Location = new Point(392, 170); browseButton.Size = new Size(100, 32); browseButton.TabIndex = 1; browseButton.AccessibleName = "Выбрать папку установки";
+                browseButton.Click += BrowseClick;
+                launch.Text = "Открыть приложение после установки"; launch.Checked = true; launch.Location = new Point(28, 234); launch.Size = new Size(300, 28); launch.TabIndex = 2;
+                installButton.Text = "Установить"; installButton.Location = new Point(356, 236); installButton.Size = new Size(136, 42); installButton.BackColor = Color.FromArgb(185, 73, 47); installButton.ForeColor = Color.White; installButton.FlatStyle = FlatStyle.Flat; installButton.FlatAppearance.BorderSize = 0; installButton.TabIndex = 3;
                 installButton.Click += InstallClick;
-                status.Location = new Point(28, 264); status.Size = new Size(464, 24); status.ForeColor = Color.FromArgb(97, 107, 107);
-                Controls.AddRange(new Control[] { title, description, folder, location, launch, installButton, status });
+                status.Location = new Point(28, 286); status.Size = new Size(464, 24); status.ForeColor = Color.FromArgb(97, 107, 107);
+                Controls.AddRange(new Control[] { title, description, folder, location, browseButton, launch, installButton, status });
                 AcceptButton = installButton;
                 FormClosing += delegate(object sender, FormClosingEventArgs e) { if (working) e.Cancel = true; };
             }
+
+            private void BrowseClick(object sender, EventArgs e)
+            {
+                using (FolderBrowserDialog dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = "Выберите папку установки «Карты путешествий»";
+                    dialog.ShowNewFolderButton = true;
+                    dialog.SelectedPath = FindBrowseStart(location.Text);
+                    if (dialog.ShowDialog(this) == DialogResult.OK) location.Text = dialog.SelectedPath;
+                }
+            }
+
+            private static string FindBrowseStart(string requested)
+            {
+                string current;
+                try
+                {
+                    if (String.IsNullOrWhiteSpace(requested) || requested.Length < 3 || requested[1] != ':' || (requested[2] != '\\' && requested[2] != '/'))
+                        throw new ArgumentException();
+                    current = Path.GetFullPath(requested);
+                }
+                catch { current = InstallDirectory; }
+                while (!String.IsNullOrEmpty(current))
+                {
+                    if (Directory.Exists(current)) return current;
+                    current = Path.GetDirectoryName(current);
+                }
+                return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            }
+
             private void InstallClick(object sender, EventArgs e)
             {
-                working = true; installButton.Enabled = false; launch.Enabled = false; status.Text = "Устанавливаем приложение…"; Cursor = Cursors.WaitCursor;
+                working = true; installButton.Enabled = false; browseButton.Enabled = false; location.Enabled = false; launch.Enabled = false; status.Text = "Устанавливаем приложение…"; Cursor = Cursors.WaitCursor;
                 Refresh();
                 bool success = false;
                 try
                 {
-                    Install();
+                    string target = ValidateInstallDirectory(location.Text);
+                    location.Text = target;
+                    Install(target);
                     success = true;
-                    if (launch.Checked) Process.Start(new ProcessStartInfo(Path.Combine(InstallDirectory, "TravelTracker.exe")) { UseShellExecute = true, WorkingDirectory = InstallDirectory });
+                    if (launch.Checked) Process.Start(new ProcessStartInfo(Path.Combine(target, "TravelTracker.exe")) { UseShellExecute = true, WorkingDirectory = target });
                 }
                 catch (Exception error)
                 {
                     status.Text = success ? "Установлено. Откройте приложение с рабочего стола." : "Установка не завершена";
                     MessageBox.Show(this, error.Message, DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
-                finally { working = false; installButton.Enabled = true; launch.Enabled = true; Cursor = Cursors.Default; }
+                finally { working = false; installButton.Enabled = true; browseButton.Enabled = true; location.Enabled = true; launch.Enabled = true; Cursor = Cursors.Default; }
                 if (success) Close();
             }
         }

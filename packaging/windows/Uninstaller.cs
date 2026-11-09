@@ -8,6 +8,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace TravelTracker.Uninstall
 {
@@ -15,6 +16,7 @@ namespace TravelTracker.Uninstall
     {
         private const string Identity = "travel-tracker-local-app-v1";
         private const string DisplayName = "Карта путешествий";
+        private const string RegistryPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TravelTracker";
 
         [STAThread]
         private static int Main(string[] args)
@@ -29,11 +31,11 @@ namespace TravelTracker.Uninstall
                 try { acquired = operation.WaitOne(0); }
                 catch (AbandonedMutexException) { acquired = true; }
                 if (!acquired) throw new IOException("Установка или удаление уже выполняется. Дождитесь завершения и попробуйте ещё раз.");
-                string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                if (String.IsNullOrWhiteSpace(local)) throw new IOException("Не удалось найти папку приложений пользователя.");
-                string expected = Path.GetFullPath(Path.Combine(local, "Programs", "TravelTracker"));
-                string actual = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (!String.Equals(Path.GetFullPath(actual), expected, StringComparison.OrdinalIgnoreCase))
+                string expected = ReadRegisteredDirectory();
+                string executable = Assembly.GetExecutingAssembly().Location;
+                string actual = CanonicalDirectory(Path.GetDirectoryName(executable));
+                if (!String.Equals(actual, expected, StringComparison.OrdinalIgnoreCase) ||
+                    !String.Equals(Path.GetFullPath(executable), Path.Combine(expected, "Uninstall.exe"), StringComparison.OrdinalIgnoreCase))
                     throw new IOException("Запустите удаление из установленной папки приложения или через параметры Windows.");
                 ValidateInstallation(expected);
                 if (!silent)
@@ -55,6 +57,38 @@ namespace TravelTracker.Uninstall
             finally
             {
                 if (operation != null) { if (acquired) operation.ReleaseMutex(); operation.Dispose(); }
+            }
+        }
+
+        private static string CanonicalDirectory(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value) || value.Length < 4 ||
+                !((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) ||
+                value[1] != ':' || (value[2] != '\\' && value[2] != '/') || value.Any(Char.IsControl))
+                throw new IOException("В записи установки указан недопустимый путь. Файлы оставлены без изменений.");
+            string normalized = value.Replace('/', '\\').TrimEnd('\\');
+            if (normalized.Length <= 3) throw new IOException("Удаление из корня диска не поддерживается.");
+            string[] segments = normalized.Substring(3).Split('\\');
+            if (segments.Any(part => part.Length == 0 || part == "." || part == ".." ||
+                part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || part.EndsWith(".", StringComparison.Ordinal) || part.EndsWith(" ", StringComparison.Ordinal)))
+                throw new IOException("В записи установки указан недопустимый путь. Файлы оставлены без изменений.");
+            string full = Path.GetFullPath(normalized).TrimEnd(Path.DirectorySeparatorChar);
+            string root = Path.GetPathRoot(full);
+            if (String.Equals(full, root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) || new DriveInfo(root).DriveType == DriveType.Network)
+                throw new IOException("Удаление из корня диска или сетевой папки не поддерживается.");
+            return full;
+        }
+
+        private static string ReadRegisteredDirectory()
+        {
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryPath))
+            {
+                if (key == null) throw new IOException("Запись установки не найдена. Файлы оставлены без изменений.");
+                string directory = CanonicalDirectory(key.GetValue("InstallLocation", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string);
+                string command = key.GetValue("UninstallString", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                if (!String.Equals(command, "\"" + Path.Combine(directory, "Uninstall.exe") + "\"", StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Запись удаления не соответствует папке приложения. Файлы оставлены без изменений.");
+                return directory;
             }
         }
 
@@ -161,10 +195,33 @@ try {
     try { $operationAcquired = $operationMutex.WaitOne(30000) }
     catch [Threading.AbandonedMutexException] { $operationAcquired = $true }
     if (-not $operationAcquired) { throw 'Установка или удаление уже выполняется. Повторите попытку после завершения.' }
-    $local = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
-    if ([String]::IsNullOrWhiteSpace($local)) { throw 'Папка приложений пользователя недоступна.' }
-    $expected = [IO.Path]::GetFullPath([IO.Path]::Combine($local, 'Programs', 'TravelTracker'))
-    if (-not [String]::Equals([IO.Path]::GetFullPath($requested), $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Недопустимая папка приложения.' }
+    $registryPath = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\TravelTracker'
+    function Get-CanonicalDirectory([string] $value) {
+        if ([String]::IsNullOrWhiteSpace($value) -or $value -notmatch '^[A-Za-z]:[\\/].+' -or $value -match '\p{Cc}') { throw 'Недопустимый путь установки.' }
+        $normalized = $value.Replace('/', '\').TrimEnd('\')
+        if ($normalized.Length -le 3) { throw 'Удаление из корня диска не поддерживается.' }
+        foreach ($part in $normalized.Substring(3).Split('\')) {
+            if ($part.Length -eq 0 -or $part -eq '.' -or $part -eq '..' -or $part.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or $part.EndsWith('.') -or $part.EndsWith(' ')) { throw 'Недопустимый путь установки.' }
+        }
+        $full = [IO.Path]::GetFullPath($normalized).TrimEnd('\')
+        $root = [IO.Path]::GetPathRoot($full)
+        $drive = New-Object IO.DriveInfo($root)
+        if ($full -eq $root.TrimEnd('\') -or $drive.DriveType -eq [IO.DriveType]::Network) { throw 'Недопустимая папка установки.' }
+        return $full
+    }
+    function Get-RegisteredDirectory {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registryPath)
+        if ($null -eq $key) { throw 'Запись установки не найдена.' }
+        try {
+            $location = Get-CanonicalDirectory ([string] $key.GetValue('InstallLocation', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames))
+            $command = [string] $key.GetValue('UninstallString', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $expectedCommand = [string][char]34 + [IO.Path]::Combine($location, 'Uninstall.exe') + [char]34
+            if (-not [String]::Equals($command, $expectedCommand, [StringComparison]::OrdinalIgnoreCase)) { throw 'Запись удаления не соответствует папке приложения.' }
+            return $location
+        } finally { $key.Dispose() }
+    }
+    $expected = Get-RegisteredDirectory
+    if (-not [String]::Equals((Get-CanonicalDirectory $requested), $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Недопустимая папка приложения.' }
     $prefix = $expected.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     function Assert-NoRedirect([string] $candidate) {
         $current = [IO.Path]::GetFullPath($candidate)
@@ -221,6 +278,7 @@ try {
             } catch { throw ('Файл приложения используется. Закройте связанные программы и повторите удаление: ' + [IO.Path]::GetFileName($file)) }
         }
     }
+    if (-not [String]::Equals((Get-RegisteredDirectory), $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Запись установки изменилась. Удаление отменено.' }
     $lastFiles = @([IO.Path]::Combine($expected, 'Uninstall.exe'), $marker, $manifest)
     foreach ($file in ($files | Where-Object { $lastFiles -notcontains $_ })) {
         if ([IO.File]::Exists($file)) {
@@ -248,14 +306,8 @@ try {
             }
         }
     } finally { [void] [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
-    $registryPath = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\TravelTracker'
-    $registry = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registryPath)
-    $ownedRegistry = $false
-    if ($null -ne $registry) {
-        try { $ownedRegistry = [String]::Equals([string] $registry.GetValue('InstallLocation'), $expected, [StringComparison]::OrdinalIgnoreCase) }
-        finally { $registry.Dispose() }
-    }
-    if ($ownedRegistry) { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($registryPath, $false) }
+    if (-not [String]::Equals((Get-RegisteredDirectory), $expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Запись установки изменилась. Удаление отменено.' }
+    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($registryPath, $false)
     foreach ($file in $lastFiles) {
         Assert-NoRedirect $file
         if (-not ([IO.Path]::GetFullPath($file)).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Недопустимый путь удаления.' }

@@ -1,11 +1,17 @@
 ﻿param(
     [Parameter(Mandatory = $true)][string]$SetupPath,
-    [switch]$InstallLifecycle
+    [switch]$InstallLifecycle,
+    [switch]$CustomInstallLifecycle,
+    [string]$PreviousSetupPath
 )
 
 $ErrorActionPreference = 'Stop'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $setup = (Resolve-Path -LiteralPath $SetupPath).Path
+if ($InstallLifecycle -and $CustomInstallLifecycle) { throw 'Run default and custom installation lifecycles separately.' }
+if ($PreviousSetupPath -and (!$InstallLifecycle -or $CustomInstallLifecycle)) { throw '-PreviousSetupPath requires only -InstallLifecycle.' }
+$initialSetup = if ($PreviousSetupPath) { (Resolve-Path -LiteralPath $PreviousSetupPath).Path } else { $setup }
+$runLifecycle = $InstallLifecycle -or $CustomInstallLifecycle
 $testId = [Guid]::NewGuid().ToString('N')
 $cacheRoot = Join-Path $workspaceRoot '.cache'
 $testRoot = Join-Path $cacheRoot ('installer-test-' + $testId)
@@ -13,7 +19,9 @@ $extractRoot = Join-Path $testRoot 'Проверка установки с пр�
 $dist = Join-Path $workspaceRoot 'dist'
 $identity = 'travel-tracker-local-app-v1'
 $displayName = 'Карта путешествий'
-$installRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs/TravelTracker'))
+$defaultInstallRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'Programs/TravelTracker'))
+$customInstallRoot = Join-Path $testRoot "Карта & путешествия 'тест'"
+$installRoot = if ($CustomInstallLifecycle) { $customInstallRoot } else { $defaultInstallRoot }
 $launcherPath = Join-Path $installRoot 'TravelTracker.exe'
 $uninstallPath = Join-Path $installRoot 'Uninstall.exe'
 $registryPath = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\TravelTracker'
@@ -25,6 +33,7 @@ $sentinelPath = Join-Path $installRoot ('qa-sentinel-' + $testId + '.txt')
 $sentinelBody = 'Installer test owned sentinel: ' + $testId
 $installedByTest = $false
 $launcherProcess = $null
+$testJunction = Join-Path $testRoot 'linked-install'
 $processCount = 0
 $checks = 0
 
@@ -57,7 +66,7 @@ function Assert-NoReparseTree([string]$Directory) {
 
 function Assert-CleanLifecycleState {
     # All checks happen before creating even the workspace test directory.
-    foreach ($path in @($installRoot) + $shortcutPaths) {
+    foreach ($path in @($defaultInstallRoot, $installRoot) + $shortcutPaths) {
         Assert-NoReparseAncestors $path
         if ([IO.File]::Exists($path) -or [IO.Directory]::Exists($path)) { throw "Lifecycle test requires absent existing state; untouched: $path" }
     }
@@ -75,6 +84,7 @@ function Invoke-Executable([string]$Path, [string]$Arguments, [int]$Timeout = 30
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $Path
     $start.Arguments = $Arguments
+    $start.WorkingDirectory = $workspaceRoot
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
@@ -197,7 +207,57 @@ function Remove-OwnedSentinelAndEmptyFolder {
     }
 }
 
-if ($InstallLifecycle) { Assert-CleanLifecycleState }
+function Assert-RejectedCustomDirectories {
+    $foreignRoot = Join-Path $testRoot 'foreign-install'
+    New-Item -ItemType Directory -Path $foreignRoot | Out-Null
+    $foreignFile = Join-Path $foreignRoot 'keep.txt'
+    [IO.File]::WriteAllText($foreignFile, $sentinelBody)
+    Assert-True ((Invoke-Executable $setup ('--silent --directory "' + $foreignRoot + '"')) -ne 0) 'Installation refuses an occupied unmarked directory'
+    Assert-True ([IO.File]::ReadAllText($foreignFile) -ceq $sentinelBody -and @([IO.Directory]::EnumerateFileSystemEntries($foreignRoot)).Count -eq 1) 'Rejected installation preserves foreign files exactly'
+
+    $driveRoot = [IO.Path]::GetPathRoot($workspaceRoot)
+    $rootEntries = @([IO.Directory]::EnumerateFileSystemEntries($driveRoot) | Sort-Object)
+    Assert-True ((Invoke-Executable $setup ('--silent --directory "' + $driveRoot.TrimEnd('\') + '\\"')) -ne 0) 'Installation refuses a drive root'
+    $entriesAfter = @([IO.Directory]::EnumerateFileSystemEntries($driveRoot) | Sort-Object)
+    Assert-True (($rootEntries -join "`n") -ceq ($entriesAfter -join "`n")) 'Rejected root selection creates no root entries'
+
+    $relativeTarget = '.cache/installer-test-' + $testId + '/relative-install'
+    Assert-True ((Invoke-Executable $setup ('--silent --directory "' + $relativeTarget + '"')) -ne 0) 'Installation refuses a relative directory'
+    Assert-True (![IO.Directory]::Exists((Join-Path $workspaceRoot $relativeTarget))) 'Rejected relative path creates no directory'
+    New-Item -ItemType Junction -Path $testJunction -Target $foreignRoot | Out-Null
+    Assert-True ((Invoke-Executable $setup ('--silent --directory "' + (Join-Path $testJunction 'new-install') + '"')) -ne 0) 'Installation refuses a directory reached through a junction'
+    Assert-True ([IO.File]::ReadAllText($foreignFile) -ceq $sentinelBody -and @([IO.Directory]::EnumerateFileSystemEntries($foreignRoot)).Count -eq 1) 'Rejected junction selection leaves its target untouched'
+    Assert-True (Test-Unregistered) 'Rejected directory selections create no shortcuts or registration'
+    Assert-True (![IO.Directory]::Exists($defaultInstallRoot)) 'Rejected directory selections create no default installation'
+}
+
+function Assert-MismatchedUninstallRegistration {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($registryPath, $true)
+    if ($null -eq $key) { throw 'Test-owned registration is missing.' }
+    $expectedCommand = '"' + $uninstallPath + '"'
+    try {
+        if ([string]$key.GetValue('InstallLocation') -cne $installRoot -or [string]$key.GetValue('UninstallString') -cne $expectedCommand) {
+            throw 'Refusing to modify registration not owned by this test.'
+        }
+        $locationKind = $key.GetValueKind('InstallLocation')
+        $commandKind = $key.GetValueKind('UninstallString')
+        $wrongDirectory = Join-Path $testRoot 'wrong-registered-directory'
+        try {
+            $key.SetValue('InstallLocation', $wrongDirectory, $locationKind)
+            Assert-True ((Invoke-Executable $uninstallPath '--silent') -ne 0) 'Uninstall refuses a mismatched registered installation directory'
+            Assert-True ([string]$key.GetValue('InstallLocation') -ceq $wrongDirectory) 'Rejected uninstall preserves the registration'
+        } finally { $key.SetValue('InstallLocation', $installRoot, $locationKind) }
+        try {
+            $key.SetValue('UninstallString', ('"' + (Join-Path $wrongDirectory 'Uninstall.exe') + '"'), $commandKind)
+            Assert-True ((Invoke-Executable $uninstallPath '--silent') -ne 0) 'Uninstall refuses a mismatched registered uninstall command'
+        } finally { $key.SetValue('UninstallString', $expectedCommand, $commandKind) }
+    } finally { $key.Dispose() }
+    Assert-True ((Invoke-Executable (Join-Path $extractRoot 'Uninstall.exe') '--silent') -ne 0) 'Uninstall refuses execution from an unregistered extracted copy'
+    Assert-Payload $installRoot
+    Assert-ShortcutsAndRegistry
+}
+
+if ($runLifecycle) { Assert-CleanLifecycleState }
 Assert-NoReparseAncestors $testRoot
 if ([IO.Directory]::Exists($testRoot) -or [IO.File]::Exists($testRoot)) { throw 'Unique test directory already exists.' }
 New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -213,14 +273,28 @@ try {
     Assert-True ((Invoke-Executable $setup ('--extract "' + $occupiedRoot + '"')) -ne 0) 'Setup rejects a nonempty extraction directory'
     Assert-True ([IO.File]::ReadAllText($occupiedFile) -ceq $sentinelBody -and @([IO.Directory]::EnumerateFileSystemEntries($occupiedRoot)).Count -eq 1) 'Rejected extraction leaves existing files untouched'
 
-    if ($InstallLifecycle) {
+    if ($runLifecycle) {
         # Repeat immediately before installation in case another process changed state.
         Assert-CleanLifecycleState
-        $installExitCode = Invoke-Executable $setup '--silent'
+        if ($CustomInstallLifecycle) {
+            Assert-RejectedCustomDirectories
+            Assert-CleanLifecycleState
+            # The default lifecycle covers a missing directory; custom covers an empty one.
+            New-Item -ItemType Directory -Path $installRoot | Out-Null
+        }
+        $firstArguments = if ($CustomInstallLifecycle) { '--silent --directory "' + $installRoot + '"' } else { '--silent' }
+        $installExitCode = Invoke-Executable $initialSetup $firstArguments
         $installedByTest = $installExitCode -eq 0
-        Assert-True ($installExitCode -eq 0) 'Silent per-user installation succeeds'
+        Assert-True ($installExitCode -eq 0) 'Silent per-user installation succeeds in the selected directory'
         Assert-Payload $installRoot
         Assert-ShortcutsAndRegistry
+        if ($CustomInstallLifecycle) {
+            Assert-True (![IO.Directory]::Exists($defaultInstallRoot)) 'Custom installation leaves the default location absent'
+            $relocationTarget = Join-Path $testRoot 'unrequested-relocation'
+            Assert-True ((Invoke-Executable $setup ('--silent --directory "' + $relocationTarget + '"')) -ne 0) 'Existing installation cannot be silently relocated'
+            Assert-True (![IO.Directory]::Exists($relocationTarget)) 'Refused relocation creates no target directory'
+            Assert-ShortcutsAndRegistry
+        }
         $launcherProcess = Start-Process -FilePath $launcherPath -ArgumentList '--headless --no-browser' -WindowStyle Hidden -PassThru
         $ready = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -235,9 +309,14 @@ try {
         Stop-OwnedLauncher
         [IO.File]::WriteAllText($sentinelPath, $sentinelBody)
         Assert-True ((Invoke-Executable $setup '--silent') -eq 0) 'Silent update succeeds after launcher closes'
+        foreach ($program in @('TravelTracker.exe', 'Uninstall.exe')) {
+            Assert-True ((Get-Sha256 (Join-Path $installRoot $program)) -ceq (Get-Sha256 (Join-Path $extractRoot $program))) "Update installs the current $program exactly"
+        }
+        if ($CustomInstallLifecycle) { Assert-True (![IO.Directory]::Exists($defaultInstallRoot)) 'Update without --directory reuses the registered custom location' }
         Assert-True ([IO.File]::ReadAllText($sentinelPath) -ceq $sentinelBody) 'Update preserves an untracked user file'
         Assert-Payload $installRoot
         Assert-ShortcutsAndRegistry
+        if ($CustomInstallLifecycle) { Assert-MismatchedUninstallRegistration }
         $tracked = [IO.File]::ReadAllLines((Join-Path $installRoot 'install.files'))
         Assert-True ((Invoke-Executable $uninstallPath '--silent') -eq 0) 'Uninstaller starts its cleanup helper'
         Wait-Uninstall
@@ -262,7 +341,15 @@ try {
         }
     }
     # Keep compact logs for review. Remove only our uniquely named extracted fixtures.
-    foreach ($fixture in @($extractRoot, (Join-Path $testRoot 'nonempty'))) {
+    if ([IO.Directory]::Exists($testJunction)) {
+        $junctionFull = [IO.Path]::GetFullPath($testJunction)
+        if (!$junctionFull.StartsWith($testRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test junction path.' }
+        if (([IO.File]::GetAttributes($junctionFull) -band [IO.FileAttributes]::ReparsePoint) -eq 0) { throw 'Unexpected ordinary folder at test junction path.' }
+        # Windows PowerShell 5.1 Remove-Item can throw NullReferenceException for
+        # directory junctions. Delete the verified link itself without recursion.
+        [IO.Directory]::Delete($junctionFull, $false)
+    }
+    foreach ($fixture in @($extractRoot, (Join-Path $testRoot 'nonempty'), (Join-Path $testRoot 'foreign-install'))) {
         if ([IO.Directory]::Exists($fixture)) {
             $full = [IO.Path]::GetFullPath($fixture)
             if (!$full.StartsWith($testRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test cleanup path.' }

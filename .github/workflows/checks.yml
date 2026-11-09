@@ -46,3 +46,9 @@ jobs:
       - name: Verify installer payload
         shell: powershell
         run: ./packaging/windows/Installer.Tests.ps1 -SetupPath ./release/Setup.exe
+      - name: Verify default installation lifecycle
+        shell: powershell
+        run: ./packaging/windows/Installer.Tests.ps1 -SetupPath ./release/Setup.exe -InstallLifecycle
+      - name: Verify custom installation lifecycle
+        shell: powershell
+        run: ./packaging/windows/Installer.Tests.ps1 -SetupPath ./release/Setup.exe -CustomInstallLifecycle
