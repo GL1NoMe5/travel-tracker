@@ -36,9 +36,13 @@ $launcherProcess = $null
 $testJunction = Join-Path $testRoot 'linked-install'
 $processCount = 0
 $checks = 0
+$lastProcessError = ''
 
 function Assert-True([bool]$Condition, [string]$Message) {
-    if (!$Condition) { throw $Message }
+    if (!$Condition) {
+        if ($script:lastProcessError) { $Message += [Environment]::NewLine + $script:lastProcessError }
+        throw $Message
+    }
     $script:checks++
     Write-Host "PASS $Message"
 }
@@ -100,6 +104,7 @@ function Invoke-Executable([string]$Path, [string]$Arguments, [int]$Timeout = 30
         $process.WaitForExit()
         [IO.File]::WriteAllText(($prefix + '.stdout.log'), $standardOutput.Result)
         [IO.File]::WriteAllText(($prefix + '.stderr.log'), $standardError.Result)
+        $script:lastProcessError = $standardError.Result.Trim()
         return $process.ExitCode
     } finally { $process.Dispose() }
 }
