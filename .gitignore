@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.cache/
+artifacts/
+test-results/
+playwright-report/
+*.local
+.DS_Store

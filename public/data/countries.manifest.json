@@ -1,0 +1,13 @@
+{
+  "source": "datasets/geo-countries (Natural Earth 1:10m Admin 0)",
+  "sourceUrl": "https://raw.githubusercontent.com/datasets/geo-countries/ca3b7150caa5d3cc3fb108a87fc6e3d57bd97d99/data/countries.geojson",
+  "commit": "ca3b7150caa5d3cc3fb108a87fc6e3d57bd97d99",
+  "sourceSha256": "392a03db8aa3ba82c105852655620129b11182b95dfc34ef046827ea7d0e5b8c",
+  "sourceLicense": "https://www.naturalearthdata.com/about/terms-of-use/",
+  "catalog": "193 UN member states + Holy See (VA) + Palestine (PS)",
+  "featureCount": 195,
+  "geojsonSha256": "fe3184ebec8377fefce9bea8957e79f219d3853a2015dab10d4c15f9e6467406",
+  "geographySha256": "284d9d46e5c0218f7694bf92e0d03cd42d156ca99300fac09c800b2799baa99f",
+  "bytes": 11141610,
+  "transformation": "Filter catalog ISO2; group same-country parts into MultiPolygon; retain all original vertices, holes and antimeridian cuts; remove unused properties; minify JSON."
+}

@@ -1,0 +1,5 @@
+{
+  "geocoding": {
+    "baseUrl": "https://nominatim.openstreetmap.org/"
+  }
+}

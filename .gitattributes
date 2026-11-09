@@ -1,0 +1,9 @@
+* text=auto
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.cs text eol=lf
+*.geojson text eol=lf
+*.ttf binary
+*.ico binary
+*.png binary
+*.exe binary
