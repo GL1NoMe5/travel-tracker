@@ -50,7 +50,7 @@ namespace TravelTracker.Setup
             }
             catch (Exception error)
             {
-                Console.Error.WriteLine(error.Message);
+                Console.Error.WriteLine(error.ToString());
                 if (args.Length == 0) MessageBox.Show(error.Message, DisplayName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
