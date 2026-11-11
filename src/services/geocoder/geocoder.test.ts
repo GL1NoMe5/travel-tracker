@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGeocoder, GeocoderError, type GeocoderLockManager } from './index';
-import { createCity, createEmptyData, validateTrackerData } from '../../domain/tracker';
+import { createCity, createEmptyData, findCityMatch, validateTrackerData } from '../../domain/tracker';
 
 const CONFIG = { geocoding: { baseUrl: 'https://nominatim.example.test/' } };
 const PARIS = {
@@ -9,6 +9,12 @@ const PARIS = {
   display_name: 'Париж, Иль-де-Франс, Франция',
   address: { city: 'Париж', state: 'Иль-де-Франс', country_code: 'fr' },
   namedetails: { 'name:ru': 'Париж' },
+};
+const EIFFEL = {
+  ...PARIS, osm_type: 'way', osm_id: 5013364, lat: '48.8583', lon: '2.2945',
+  name: 'Tour Eiffel', addresstype: 'tourism', type: 'attraction', category: 'tourism',
+  display_name: 'Эйфелева башня, Париж, Иль-де-Франс, Франция',
+  namedetails: { 'name:ru': 'Эйфелева башня' },
 };
 
 class MemoryStorage {
@@ -132,6 +138,98 @@ describe('explicit Nominatim requests', () => {
     await expect(h.client.reverseGeocode([181, 0])).rejects.toMatchObject({ code: 'invalid-input' });
     await expect(h.client.reverseGeocode([0, NaN])).rejects.toMatchObject({ code: 'invalid-input' });
     expect(h.fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('explicit search for wishlist places', () => {
+  it('finds named POIs in Russian without city-only filters or a shared city identity', async () => {
+    const louvre = { ...EIFFEL, osm_id: 777, name: 'Musée du Louvre', namedetails: { 'name:ru': 'Лувр' } };
+    const h = harness(() => Response.json([EIFFEL, louvre, PARIS, EIFFEL]));
+    expect(h.fetcher).not.toHaveBeenCalled();
+    const places = await complete(h.client.searchPlaces('  Музеи   Парижа  '));
+    expect(places.map(place => [place.name, place.localityName])).toEqual([
+      ['Эйфелева башня', 'Эйфелева башня'], ['Лувр', 'Лувр'], ['Париж', 'Париж'],
+    ]);
+    expect(places[0]).toMatchObject({ osmRef: 'way:5013364', countryCode: 'FR', coordinates: [2.2945, 48.8583] });
+    const params = h.dispatches[0].url.searchParams;
+    expect(params.get('q')).toBe('Музеи Парижа');
+    expect(params.get('accept-language')).toBe('ru');
+    expect(params.get('namedetails')).toBe('1');
+    expect(params.get('limit')).toBe('8');
+    expect(params.has('featureType')).toBe(false);
+    expect(params.has('layer')).toBe(false);
+    const saved = createCity(places[0], 'wishlist');
+    expect(findCityMatch([saved], places[1])).toEqual({ exact: undefined, suggestions: [] });
+    expect(findCityMatch([saved], places[2])).toEqual({ exact: undefined, suggestions: [] });
+  });
+
+  it('keeps object-name fallbacks and rejects unnamed, malformed and large-area results', async () => {
+    const h = harness(() => Response.json([
+      { ...EIFFEL, namedetails: {}, name: 'Tower' },
+      { ...EIFFEL, osm_id: 2, namedetails: { name: 'Garden' }, name: '' },
+      { ...EIFFEL, osm_id: 3, namedetails: {}, name: '', display_name: 'Париж, Франция' },
+      { ...EIFFEL, osm_id: 4, lon: true },
+      ...['country', 'state', 'county', 'region'].map((addresstype, index) => ({ ...EIFFEL, osm_id: index + 10, type: 'administrative', addresstype })),
+    ]));
+    const places = await complete(h.client.searchPlaces('Tower'));
+    expect(places.map(place => place.name)).toEqual(['Tower', 'Garden']);
+    expect(places.map(place => place.localityName)).toEqual(['Tower', 'Garden']);
+  });
+
+  it('separates city and place caches for the same query, including across client instances', async () => {
+    const h = harness(url => Response.json(url.searchParams.has('featureType') ? [PARIS] : [EIFFEL]));
+    expect((await complete(h.client.searchCities('Париж')))[0].name).toBe('Париж');
+    const found = await complete(h.client.searchPlaces('Париж'));
+    expect(found[0].name).toBe('Эйфелева башня');
+    found[0].name = 'Changed';
+    const reopened = createGeocoder(h.options);
+    expect((await reopened.searchPlaces('Париж'))[0].name).toBe('Эйфелева башня');
+    expect((await reopened.searchCities('Париж'))[0].name).toBe('Париж');
+    expect(h.dispatches).toHaveLength(2);
+  });
+
+  it('preserves the previous settlement parsing and reverse coordinates', async () => {
+    const h = harness(url => Response.json(url.pathname === '/search' ? [EIFFEL] : EIFFEL));
+    expect((await complete(h.client.searchCities('Париж')))[0]).toMatchObject({ name: 'Париж', localityName: 'Париж' });
+    expect((await complete(h.client.reverseGeocode([2.3, 48.9])))).toMatchObject({ name: 'Париж', coordinates: [2.3, 48.9] });
+    expect(h.dispatches[0].url.searchParams.get('featureType')).toBe('city');
+    expect(h.dispatches[1].url.searchParams.get('zoom')).toBe('10');
+    expect(h.dispatches[1].url.searchParams.get('layer')).toBe('address');
+  });
+
+  it('bounds named objects to the domain and ignores malformed persisted place cache entries', async () => {
+    const h = harness(() => Response.json([{ ...EIFFEL, namedetails: { 'name:ru': 'Я'.repeat(400) } }]));
+    const [candidate] = await complete(h.client.searchPlaces('Башня'));
+    expect(candidate.name).toHaveLength(120);
+    expect(candidate.localityName).toHaveLength(300);
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [createCity(candidate, 'wishlist')] })).not.toThrow();
+    const entries = JSON.parse(h.storage.getItem('travel-tracker:geocoder-cache:v1')!);
+    entries[0].data[0].localityName = 'П'.repeat(301);
+    h.storage.setItem('travel-tracker:geocoder-cache:v1', JSON.stringify(entries));
+    const [fresh] = await complete(createGeocoder(h.options).searchPlaces('Башня'));
+    expect(fresh.localityName).toHaveLength(300);
+    expect(h.dispatches).toHaveLength(2);
+  });
+
+  it('rejects invalid queries before fetching and malformed responses without caching them', async () => {
+    const h = harness(() => Response.json({ error: 'invalid results' }));
+    await expect(h.client.searchPlaces(' ')).rejects.toMatchObject({ code: 'invalid-input' });
+    await expect(h.client.searchPlaces('Я'.repeat(201))).rejects.toMatchObject({ code: 'invalid-input' });
+    expect(h.fetcher).not.toHaveBeenCalled();
+    await expect(complete(h.client.searchPlaces('Башня'))).rejects.toMatchObject({ code: 'invalid-response' });
+    expect(h.storage.getItem('travel-tracker:geocoder-cache:v1')).toBeNull();
+  });
+
+  it('shares the existing lock and interval with city search and reverse requests', async () => {
+    const h = harness();
+    await complete(Promise.all([
+      h.client.searchPlaces('Париж'),
+      createGeocoder(h.options).searchCities('Париж'),
+      createGeocoder(h.options).reverseGeocode([2.35, 48.85]),
+    ]));
+    expect(h.dispatches).toHaveLength(3);
+    expect(h.dispatches[1].at - h.dispatches[0].at).toBeGreaterThanOrEqual(1100);
+    expect(h.dispatches[2].at - h.dispatches[1].at).toBeGreaterThanOrEqual(1100);
   });
 });
 

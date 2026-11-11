@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
-import { createVisit, MAX_NAME_LENGTH, MAX_NOTE_LENGTH } from '../domain/tracker';
-import type { City, Visit } from '../domain/types';
+import { Check, Heart, Plus, Trash2, X } from 'lucide-react';
+import { createVisit, markCityVisited, MAX_NAME_LENGTH, MAX_NOTE_LENGTH } from '../domain/tracker';
+import type { City, PlaceStatus, Visit } from '../domain/types';
+import { PlaceStatusSwitch } from './PlaceStatusSwitch';
 
 interface Props {
   city: City;
@@ -18,6 +19,15 @@ export function CityEditor({ city, existing, disabled, pendingAction, onChange, 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const latestVisit = city.visits[city.visits.length - 1];
   const earlierVisits = city.visits.slice(0, -1);
+  const isWish = city.status === 'wishlist';
+
+  function changeStatus(status: PlaceStatus) {
+    if (status === (city.status ?? 'visited')) return;
+    if (status === 'visited') { onChange(markCityVisited(city)); return; }
+    if ((city.visits.length > 1 || city.visits.some(visit => visit.date)) &&
+      !window.confirm('Перенести в желания? Даты и история этого несохранённого места будут убраны.')) return;
+    onChange({ ...city, status: 'wishlist', wishNote: city.visits.map(visit => visit.note).filter(Boolean).join('\n\n'), visits: [] });
+  }
 
   useEffect(() => {
     nameInputRef.current?.focus();
@@ -73,7 +83,7 @@ export function CityEditor({ city, existing, disabled, pendingAction, onChange, 
   return (
     <section className="editor" aria-label="Редактор места">
       <header className="section-heading">
-        <h2 className="editor-heading">{existing ? city.name || 'Ваше место' : 'Новое место'}</h2>
+        <h2 className="editor-heading">{existing ? city.name || 'Ваше место' : isWish ? 'Новое желание' : 'Новое место'}</h2>
         <button type="button" className="icon-button" aria-label="Закрыть редактор" disabled={Boolean(pendingAction)} onClick={onClose}>
           <X size={20} aria-hidden="true" />
         </button>
@@ -87,6 +97,8 @@ export function CityEditor({ city, existing, disabled, pendingAction, onChange, 
       >
         {pendingAction ? <p role="status" className="hint">{pendingAction === 'save' ? 'Сохраняем место…' : 'Удаляем место…'}</p> : null}
         <fieldset disabled={disabled || Boolean(pendingAction)}>
+          {!existing ? <PlaceStatusSwitch value={city.status ?? 'visited'} onChange={changeStatus} /> : null}
+          {existing && isWish ? <p className="wish-label"><Heart size={18} aria-hidden="true" />Хочу посетить</p> : null}
           <label className="field">
             <span>Название места</span>
             <input
@@ -98,8 +110,12 @@ export function CityEditor({ city, existing, disabled, pendingAction, onChange, 
               onChange={(event) => onChange({ ...city, name: event.target.value })}
             />
           </label>
-          {latestVisit ? visitFields(latestVisit) : null}
-          {existing || earlierVisits.length > 0 ? (
+          {isWish ? <label className="field">
+            <span>Заметка</span>
+            <textarea aria-label="Заметка" rows={3} maxLength={MAX_NOTE_LENGTH} value={city.wishNote ?? ''}
+              placeholder="Что хочется здесь увидеть?" onChange={event => onChange({ ...city, wishNote: event.target.value })} />
+          </label> : latestVisit ? visitFields(latestVisit) : null}
+          {!isWish && (existing || earlierVisits.length > 0) ? (
             <details className="visit-history" key={city.id}>
               <summary>Прошлые поездки{earlierVisits.length ? ` · ${earlierVisits.length}` : ''}</summary>
               {earlierVisits.map((visit, index) => (
@@ -115,14 +131,17 @@ export function CityEditor({ city, existing, disabled, pendingAction, onChange, 
             </details>
           ) : null}
           <div className="editor-submit-row">
-            <button className="primary wide" type="submit">Сохранить</button>
+            <button className={`primary wide${isWish ? ' wish-primary' : ''}`} type="submit">Сохранить</button>
           </div>
+          {existing && isWish ? <button type="button" className="secondary wide mark-visited" onClick={() => changeStatus('visited')}>
+            <Check size={18} aria-hidden="true" />Отметить посещённым
+          </button> : null}
           {existing ? (
             <button
               type="button"
               className="text-button danger"
               onClick={() => {
-                if (window.confirm('Удалить это место и все воспоминания о нём?')) onDelete();
+                if (window.confirm(isWish ? 'Удалить это место из желаний?' : 'Удалить это место и все воспоминания о нём?')) onDelete();
               }}
             >
               <Trash2 size={16} aria-hidden="true" /> Удалить место

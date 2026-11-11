@@ -7,6 +7,7 @@
   --muted: #6b7474; --line: #dce0dc; --accent: #b9492f; --accent-hover: #a33e27; --wash: #f1f3ef;
   --hover: #e5eae3; --soft-line: #e6e9e3; --danger: #a63d2a; --match: #f8ede8;
   --on-accent: #fff; --selection: #f3d8cf; --scrollbar: #aab7ae; --shadow: #26323012;
+  --wish: #7143a6; --wish-wash: #f2edf8; --wish-hover: #60368f; --on-wish: #fff;
   font-family: Manrope, 'Segoe UI', sans-serif; color: var(--ink); background: var(--paper);
   font-synthesis: none; font-weight: 400; line-height: 1.5; font-size: 14px;
 }
@@ -16,6 +17,7 @@
   --muted: #a4b7bb; --line: #405159; --accent: #ed9b7f; --accent-hover: #ffb397;
   --wash: #293942; --hover: #344650; --soft-line: #36474f; --danger: #ffb3a4;
   --match: #45392f; --on-accent: #30211b; --selection: #704938; --scrollbar: #617b85; --shadow: #00000033;
+  --wish: #d0b1f4; --wish-wash: #342d42; --wish-hover: #e0c6ff; --on-wish: #2d1d43;
 }
 * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 [hidden] { display: none !important; }
@@ -109,8 +111,8 @@ a { color: inherit; text-underline-offset: 3px; }
 .map-pick-button:hover { color: var(--accent); }
 .search-attribution { display: inline-block; margin-top: 24px; font-size: 10px; color: var(--secondary); text-decoration: none; }
 .search-attribution:hover { text-decoration: underline; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: 12px; gap: 24px; }
-.tabs button { position: relative; padding: 8px 0 16px; color: var(--secondary); gap: 8px; }
+.tabs { display: grid; grid-template-columns: auto auto minmax(0, 1fr); border-bottom: 1px solid var(--line); margin-bottom: 12px; gap: 12px; }
+.tabs button { position: relative; padding: 8px 0 16px; color: var(--secondary); gap: 6px; min-width: 0; font-size: 13px; }
 .tabs button[aria-selected='true'] { color: var(--ink); }
 .tabs button[aria-selected='true']::after { position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--accent); content: ''; }
 .tabs span { color: var(--secondary); font-variant-numeric: tabular-nums; font-size: 12px; }
@@ -197,6 +199,29 @@ a { color: inherit; text-underline-offset: 3px; }
 .overview-list button small { color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .journey-overview .text-button { color: var(--accent); }
 .collection-stats { padding: 0 0 20px; color: var(--secondary); font-size: 13px; line-height: 1.6; }
+.place-status-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 24px; border-radius: 12px; background: var(--wash); }
+.place-status-switch button { padding: 8px; min-width: 0; border-radius: 8px; font-size: 13px; line-height: 1.4; color: var(--secondary); }
+.place-status-switch svg { flex: none; }
+.place-status-switch button[aria-pressed='true'] { background: var(--surface); color: var(--ink); box-shadow: 0 2px 6px var(--shadow); }
+.place-status-switch .wish-option[aria-pressed='true'] { color: var(--wish); background: var(--wish-wash); box-shadow: inset 0 0 0 1px var(--wish); }
+.wishlist-entry { color: var(--wish); background: var(--wish-wash); border: 1px solid var(--wish); border-radius: 8px; font-weight: 500; }
+.wishlist-entry:hover:not(:disabled) { color: var(--wish-hover); }
+.wishlist-entry svg { flex: none; }
+.wishlist-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.journey-overview .wishlist-entry { width: 100%; margin-top: 16px; padding: 12px; }
+.wish-primary { background: var(--wish); color: var(--on-wish); }
+.wish-primary:hover:not(:disabled) { background: var(--wish-hover); }
+.wish-label { display: flex; gap: 8px; align-items: center; color: var(--wish); margin: 0 0 20px; font-size: 13px; }
+.wish-icon, .place-list .wish-icon { color: var(--wish); }
+.wish-preview { display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.add-wish { margin-top: 16px; }
+.mark-visited { margin-top: 12px; }
+.marker-colors { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 8px; }
+.marker-colors summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--secondary); font-size: 13px; }
+.marker-colors .custom-color { font-size: 13px; }
+.marker-colors .text-button { font-size: 13px; }
+.mobile-dock-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mobile-dock-actions > button { padding: 12px 8px; font-size: 13px; gap: 6px; }
 @media (min-width: 761px) and (max-width: 1100px) {
   .journey-overview { left: 24px; width: 240px; padding: 20px; }
 }

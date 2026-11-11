@@ -67,8 +67,8 @@
 }
 
 .travel-map__marker {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: none;
   background: transparent;
@@ -85,10 +85,10 @@
 .travel-map__marker-pin {
   width: 32px;
   height: 32px;
-  border-radius: 8px 8px 8px 2px;
-  border: 1.5px solid #ffffff;
-  background: #b9492f;
-  color: #ffffff;
+  border-radius: 50% 50% 50% 4px;
+  border: 1.5px solid var(--marker-ink, #ffffff);
+  background: var(--marker-color, #b9492f);
+  color: var(--marker-ink, #ffffff);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -103,7 +103,6 @@
 
 .travel-map__marker:hover .travel-map__marker-pin {
   transform: translateY(-2px) scale(1.06);
-  background: #a33e27;
 }
 
 .travel-map__marker:focus-visible {
@@ -111,8 +110,9 @@
 }
 
 .travel-map__marker:focus-visible .travel-map__marker-pin {
-  outline: 2px solid #b9492f;
-  outline-offset: 2px;
+  outline: 2px solid var(--ink, #283132);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--surface, #ffffff), 0 4px 12px #19202b66;
 }
 
 .travel-map__marker--selected {
@@ -120,12 +120,9 @@
 }
 
 .travel-map__marker--selected .travel-map__marker-pin {
-  background: #b9492f;
-  color: #ffffff;
-  border-color: #ffffff;
-  box-shadow:
-    0 0 0 3px rgba(45, 212, 191, 0.5),
-    0 10px 22px rgba(9, 24, 19, 0.55);
+  outline: 2px solid var(--ink, #283132);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 3px var(--surface, #ffffff), 0 4px 12px #19202b66;
   transform: translateY(-2px) scale(1.08);
 }
 
@@ -136,12 +133,7 @@
 }
 
 .travel-map__marker--draft .travel-map__marker-pin {
-  background: #e08a44;
-  color: #ffffff;
-  border: 1.5px dashed #ffffff;
-  box-shadow:
-    0 0 0 3px rgba(224, 138, 68, 0.38),
-    0 8px 18px rgba(9, 24, 19, 0.45);
+  border-style: dashed;
 }
 
 .travel-map__marker.maplibregl-marker-covered,
@@ -287,9 +279,6 @@
 
 .travel-map__control-btn { border: 1px solid #dce0dc; border-radius: 8px; box-shadow: 0 2px 8px #28313208; background: #ffffff; }
 .travel-map__control-btn:hover:not(:disabled) { border-color: #c5ccc6; color: #b9492f; }
-.travel-map__marker--selected .travel-map__marker-pin { box-shadow: 0 4px 12px #28313235; }
-.travel-map__marker--draft .travel-map__marker-pin { background: #c45b3d; box-shadow: 0 4px 12px #28313235; }
-.travel-map__marker-pin { border-radius: 50% 50% 50% 4px; }
 .travel-map .maplibregl-ctrl-attrib { border: 0; border-radius: 4px; background: #f5f5f2e6 !important; }
 
 .travel-map__control-btn,
@@ -301,8 +290,22 @@
 .travel-map .maplibregl-ctrl-attrib { background: var(--paper, #f5f5f2) !important; color: var(--secondary, #616b6b) !important; }
 .travel-map .maplibregl-ctrl-attrib a { color: var(--ink, #283132) !important; }
 .travel-map__control-btn:focus-visible,
-.travel-map .maplibregl-canvas:focus-visible,
-.travel-map__marker:focus-visible .travel-map__marker-pin { outline-color: var(--accent, #b9492f); }
-:root[data-theme='dark'] .travel-map__marker-pin { border-color: #ecded4; background: #b9492f; }
-:root[data-theme='dark'] .travel-map__marker--selected .travel-map__marker-pin { border-color: #fff; box-shadow: 0 4px 12px #0008; }
-:root[data-theme='dark'] .travel-map__marker--draft .travel-map__marker-pin { background: #c45b3d; border-color: #ffe4cb; }
+.travel-map .maplibregl-canvas:focus-visible { outline-color: var(--accent, #b9492f); }
+
+/* The heart silhouette identifies wishes even when both categories share a color. */
+.travel-map__marker--wishlist .travel-map__marker-pin {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--wish-color, #8655bf);
+  box-shadow: none;
+}
+.travel-map__marker--wishlist .travel-map__marker-pin svg {
+  stroke: var(--wish-outline, #ffffff);
+  filter: drop-shadow(0 3px 3px #19202b55);
+}
+.travel-map__marker--wishlist.travel-map__marker--selected .travel-map__marker-pin,
+.travel-map__marker--wishlist:focus-visible .travel-map__marker-pin {
+  box-shadow: 0 0 0 3px var(--surface, #ffffff), 0 4px 12px #19202b66;
+}
+.travel-map__marker--wishlist.travel-map__marker--draft .travel-map__marker-pin svg { stroke-dasharray: 3 2; }

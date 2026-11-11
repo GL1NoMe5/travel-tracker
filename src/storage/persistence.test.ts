@@ -24,6 +24,41 @@ describe('snapshots and backups', () => {
     expect(loaded.raw).toBe(raw);
     expect(store.getItem(STORAGE_KEY)).toBe(raw);
   });
+  it('round-trips plans and visited places together without fabricating visits', () => {
+    const plan = { ...createCity({ name: 'Самарканд', displayName: 'Самарканд', coordinates: [66.97, 39.65], osmRef: 'node:123' }, 'wishlist'), wishNote: 'Увидеть Регистан\nПопробовать плов' };
+    const oldCity = createCity({ name: 'Алматы', displayName: 'Алматы', coordinates: [76.9, 43.2] });
+    oldCity.visits[0].note = 'Старое воспоминание';
+    const data = { ...createEmptyData(), cities: [plan, oldCity] };
+    const store = memory();
+    persistTracker(store, data);
+    const raw = store.getItem(STORAGE_KEY);
+    expect(loadTracker(store).data).toEqual(data);
+    expect(parseBackup(serializeBackup(data))).toEqual(data);
+    expect(loadTracker(store).data.cities[0].visits).toEqual([]);
+    expect(loadTracker(store).data.cities[1]).not.toHaveProperty('status');
+    expect(store.getItem(STORAGE_KEY)).toBe(raw);
+  });
+  it('preserves an existing legacy city snapshot byte for byte when loading', () => {
+    const city = createCity({ name: 'Алматы', displayName: 'Алматы', coordinates: [76.9, 43.2] });
+    const raw = JSON.stringify({ schemaVersion: 1, countryColors: {}, cities: [city] });
+    const store = memory(raw);
+    const loaded = loadTracker(store);
+    expect(loaded.kind).toBe('ok');
+    expect(loaded.data.cities).toEqual([city]);
+    expect(store.getItem(STORAGE_KEY)).toBe(raw);
+  });
+  it('keeps corrupt plan data intact and refuses to replace a good snapshot with it', () => {
+    const city = createCity({ name: 'Алматы', displayName: 'Алматы', coordinates: [76.9, 43.2] });
+    const broken = { ...createEmptyData(), cities: [{ ...city, status: 'wishlist' as const, wishNote: 'План с ошибочно сохранённым визитом' }] };
+    const raw = JSON.stringify(broken);
+    const damagedStore = memory(raw);
+    expect(loadTracker(damagedStore).kind).toBe('corrupt');
+    expect(damagedStore.getItem(STORAGE_KEY)).toBe(raw);
+    const validRaw = serializeBackup({ ...createEmptyData(), cities: [city] });
+    const goodStore = memory(validRaw);
+    expect(() => persistTracker(goodStore, broken)).toThrow(/не должно быть визитов/);
+    expect(goodStore.getItem(STORAGE_KEY)).toBe(validRaw);
+  });
   it('leaves invalid country visit counts untouched instead of silently resetting them', () => {
     const raw = JSON.stringify({ schemaVersion: 1, countryColors: { KG: '#46A88C' }, countryVisits: { KG: -3 }, cities: [] });
     const store = memory(raw);

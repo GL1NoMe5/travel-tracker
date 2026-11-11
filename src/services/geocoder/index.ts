@@ -20,6 +20,7 @@ export class GeocoderError extends Error {
 
 export interface GeocoderClient {
   searchCities(query: string, signal?: AbortSignal): Promise<PlaceCandidate[]>;
+  searchPlaces(query: string, signal?: AbortSignal): Promise<PlaceCandidate[]>;
   reverseGeocode(coordinates: LngLat, signal?: AbortSignal): Promise<PlaceCandidate>;
 }
 
@@ -81,19 +82,26 @@ function validCoordinates(value: unknown): value is LngLat {
 }
 
 const SETTLEMENT_TYPES = new Set(['city', 'town', 'village', 'hamlet', 'municipality', 'isolated_dwelling']);
+const LARGE_AREA_TYPES = new Set(['country', 'state', 'province', 'region', 'county', 'state_district']);
+type ResultKind = 'settlement' | 'place';
 
-function parsePlace(value: unknown): PlaceCandidate | null {
+function parsePlace(value: unknown, kind: ResultKind = 'settlement'): PlaceCandidate | null {
   const item = record(value);
   const address = record(item.address);
   const names = record(item.namedetails);
   const coordinates: LngLat = [coordinate(item.lon), coordinate(item.lat)];
   if (!validCoordinates(coordinates)) return null;
   const ownSettlement = SETTLEMENT_TYPES.has(String(item.addresstype)) || SETTLEMENT_TYPES.has(String(item.type));
-  const locality = text(address.city, 300) ?? text(address.town, 300) ?? text(address.village, 300)
+  const ownObject = kind === 'place' && !ownSettlement;
+  if (ownObject && (LARGE_AREA_TYPES.has(String(item.addresstype)) || LARGE_AREA_TYPES.has(String(item.type)))) return null;
+  // A POI's surrounding city is context, not its identity. Unnamed objects are
+  // skipped instead of silently turning every park/museum into the same city.
+  const ownName = text(names['name:ru'], 300) ?? text(item.name, 300) ?? text(names.name, 300);
+  const locality = ownObject ? ownName : text(address.city, 300) ?? text(address.town, 300) ?? text(address.village, 300)
     ?? text(address.municipality, 300) ?? text(address.hamlet, 300) ?? (ownSettlement ? text(item.name, 300) : undefined);
   if (!locality) return null;
   // namedetails belongs to the returned object, which can be an administrative area.
-  const name = (ownSettlement ? text(names['name:ru'], 120) : undefined) ?? text(locality, 120)!;
+  const name = (ownSettlement && !ownObject ? text(names['name:ru'], 120) : undefined) ?? text(locality, 120)!;
   const countryCode = /^[a-z]{2}$/i.test(String(address.country_code))
     ? String(address.country_code).toUpperCase() : undefined;
   const osmType = text(item.osm_type);
@@ -252,7 +260,7 @@ export function createGeocoder(options: GeocoderOptions = {}): GeocoderClient {
     return item ? structuredClone(item.data) : undefined;
   }
 
-  async function request(path: string, params: Record<string, string>, signal?: AbortSignal): Promise<PlaceCandidate[]> {
+  async function request(path: string, params: Record<string, string>, signal?: AbortSignal, kind: ResultKind = 'settlement'): Promise<PlaceCandidate[]> {
     abortIfNeeded(signal);
     const baseUrl = await loadBaseUrl();
     abortIfNeeded(signal);
@@ -285,7 +293,7 @@ export function createGeocoder(options: GeocoderOptions = {}): GeocoderClient {
         if (path === 'search') {
           if (!Array.isArray(raw)) throw new GeocoderError('invalid-response', 'Сервис вернул некорректные результаты поиска.');
           const seen = new Set<string>();
-          places = raw.slice(0, 20).map(parsePlace).filter((place): place is PlaceCandidate => place !== null)
+          places = raw.slice(0, 20).map(item => parsePlace(item, kind)).filter((place): place is PlaceCandidate => place !== null)
             .filter(place => {
               const key = place.osmRef ?? `${place.name}|${place.coordinates.join(',')}`;
               if (seen.has(key)) return false;
@@ -315,6 +323,15 @@ export function createGeocoder(options: GeocoderOptions = {}): GeocoderClient {
         throw new GeocoderError('invalid-input', 'Введите название от 2 до 200 символов.');
       }
       return request('search', { q: normalized, limit: '8', featureType: 'city', layer: 'address' }, signal);
+    },
+    async searchPlaces(query, signal) {
+      const normalized = query.trim().replace(/\s+/g, ' ');
+      if (normalized.length < 2 || normalized.length > 200) {
+        throw new GeocoderError('invalid-input', 'Введите название от 2 до 200 символов.');
+      }
+      // Omitting featureType/layer includes POIs and natural features. The URL
+      // also keeps these named-object results separate from the city cache.
+      return request('search', { q: normalized, limit: '8' }, signal, 'place');
     },
     async reverseGeocode(coordinates, signal) {
       if (!validCoordinates(coordinates)) throw new GeocoderError('invalid-input', 'Некорректные координаты точки.');

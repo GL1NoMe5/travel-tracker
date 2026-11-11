@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type CSSProperties,
 } from 'react';
 import {
   AttributionControl,
@@ -51,6 +52,7 @@ import {
 } from './helpers';
 import { measureDomViewportPadding, observeUiPanels } from './layout';
 import { createMapThemeController } from './theme';
+import { DEFAULT_MARKER_COLORS, markerForeground } from './markerColors';
 import './map.css';
 
 setWorkerUrl(maplibreWorkerUrl);
@@ -72,6 +74,21 @@ const FLAG_ICON_SVG = `
     <line x1="4" x2="4" y1="22" y2="15"></line>
   </svg>
 `;
+
+// Lucide Heart (ISC), matching the icon family used throughout the interface.
+const HEART_ICON_SVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"></path>
+  </svg>
+`;
+
+function syncMarkerAppearance(element: HTMLElement, status: TravelMapProps['draftStatus'] = 'visited') {
+  // Preserve the button, focus and its event handlers when a wish becomes a visit.
+  if (element.dataset.placeStatus === status) return;
+  element.dataset.placeStatus = status;
+  element.classList.toggle('travel-map__marker--wishlist', status === 'wishlist');
+  element.innerHTML = `<span class="travel-map__marker-pin">${status === 'wishlist' ? HEART_ICON_SVG : FLAG_ICON_SVG}</span>`;
+}
 
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -275,6 +292,8 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     cities,
     selectedCityId,
     draftCoordinates,
+    draftStatus = 'visited',
+    markerColors = DEFAULT_MARKER_COLORS,
     onCountrySelect,
     onCitySelect,
     onMapPointSelect,
@@ -308,6 +327,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     cities,
     selectedCityId,
     draftCoordinates,
+    draftStatus,
     onCountrySelect,
     onCitySelect,
     onMapPointSelect,
@@ -322,6 +342,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     cities,
     selectedCityId,
     draftCoordinates,
+    draftStatus,
     onCountrySelect,
     onCitySelect,
     onMapPointSelect,
@@ -480,6 +501,9 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       for (const city of validCities) {
         const normalizedCoords = normalizeLngLat(city.coordinates);
         const isSelected = city.id === activeCityId;
+        const label = city.status === 'wishlist'
+          ? `Место ${city.name}: хочу посетить`
+          : `Город ${city.name}: открыть визиты`;
         const existing = cityMarkersRef.current.get(city.id);
 
         if (existing) {
@@ -489,10 +513,11 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
           existing.element.title = city.name;
           existing.element.setAttribute(
             'aria-label',
-            `Город ${city.name}: открыть визиты`,
+            label,
           );
           existing.element.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
           existing.element.classList.toggle('travel-map__marker--selected', isSelected);
+          syncMarkerAppearance(existing.element, city.status);
           continue;
         }
 
@@ -505,10 +530,10 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
         button.title = city.name;
         button.setAttribute(
           'aria-label',
-          `Город ${city.name}: открыть визиты`,
+          label,
         );
         button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-        button.innerHTML = `<span class="travel-map__marker-pin">${FLAG_ICON_SVG}</span>`;
+        syncMarkerAppearance(button, city.status);
 
         const handleSelect = (event: Event) => {
           event.stopPropagation();
@@ -546,7 +571,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
   );
 
   const syncDraftMarker = useCallback(
-    (nextDraftCoordinates: LngLat | null) => {
+    (nextDraftCoordinates: LngLat | null, nextDraftStatus: TravelMapProps['draftStatus'] = 'visited') => {
       const map = mapRef.current;
       if (!map) return;
 
@@ -562,6 +587,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       if (draftMarkerRef.current) {
         draftMarkerRef.current.coordinates = normalizedCoords;
         draftMarkerRef.current.marker.setLngLat(normalizedCoords);
+        syncMarkerAppearance(draftMarkerRef.current.element, nextDraftStatus);
         syncMarkersOcclusion();
         return;
       }
@@ -570,7 +596,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       draftEl.className = 'travel-map__marker travel-map__marker--draft';
       draftEl.dataset.testid = 'draft-city-marker';
       draftEl.setAttribute('aria-hidden', 'true');
-      draftEl.innerHTML = `<span class="travel-map__marker-pin">${FLAG_ICON_SVG}</span>`;
+      syncMarkerAppearance(draftEl, nextDraftStatus);
 
       const marker = new Marker({
         element: draftEl,
@@ -731,7 +757,7 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
       styleReadyRef.current = true;
 
       syncCityMarkers(propsRef.current.cities, propsRef.current.selectedCityId);
-      syncDraftMarker(propsRef.current.draftCoordinates);
+      syncDraftMarker(propsRef.current.draftCoordinates, propsRef.current.draftStatus);
       syncMarkersOcclusion();
 
       if (pendingCameraActionRef.current) {
@@ -1024,8 +1050,8 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !styleReadyRef.current) return;
-    syncDraftMarker(draftCoordinates);
-  }, [draftCoordinates, syncDraftMarker]);
+    syncDraftMarker(draftCoordinates, draftStatus);
+  }, [draftCoordinates, draftStatus, syncDraftMarker]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1085,6 +1111,12 @@ export const TravelMap = forwardRef<TravelMapHandle, TravelMapProps>(function Tr
     <div
       ref={rootRef}
       className="travel-map"
+      style={{
+        '--marker-color': markerColors.visited,
+        '--marker-ink': markerForeground(markerColors.visited),
+        '--wish-color': markerColors.wishlist,
+        '--wish-outline': markerForeground(markerColors.wishlist),
+      } as CSSProperties}
       data-testid="travel-map"
       data-map-mode={mode}
       data-map-status={status.kind}

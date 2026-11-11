@@ -1,9 +1,20 @@
 import type { LayerSpecification, Map as MapLibreMap, SkySpecification } from 'maplibre-gl';
 import type { Theme } from '../hooks/ui/useTheme';
 
+const LIBERTY_ROAD_SHIELDS = new Set(['highway-shield-non-us', 'highway-shield-us-interstate', 'road_shield_us']);
+
 /** Only basemap colors change; user-selected country colors are never recolored. */
 export function darkPaint(layer: LayerSpecification): Record<string, string> {
   if (layer.id.startsWith('travel-') || ('source' in layer && layer.source === 'travel-countries')) return {};
+  if (layer.type === 'symbol' && LIBERTY_ROAD_SHIELDS.has(layer.id)
+    && layer['source-layer'] === 'transportation_name' && layer.layout?.['icon-image']) {
+    const field = JSON.stringify(layer.layout['text-field']);
+    if (field === '"{ref}"' || field === '["get","ref"]' || field === '["to-string",["get","ref"]]') {
+      // Liberty pairs route numbers with white, non-SDF road_/us-* sprites.
+      // Preserve their original text paint together with that unchanged artwork.
+      return {};
+    }
+  }
   const name = `${layer.id} ${'source-layer' in layer ? layer['source-layer'] : ''}`;
   const water = /water|ocean|lake|river/i.test(name);
   switch (layer.type) {

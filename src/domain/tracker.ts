@@ -1,5 +1,5 @@
 import { isCountryCode } from '../data/countries';
-import type { City, PlaceCandidate, TrackerData, Visit } from './types';
+import type { City, PlaceCandidate, PlaceStatus, TrackerData, Visit } from './types';
 
 export const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_NOTE_LENGTH = 1000;
@@ -82,7 +82,17 @@ export function validateTrackerData(input: unknown): TrackerData {
       osmRefs.add(ref);
       return ref;
     });
-    if (!Array.isArray(raw.visits) || raw.visits.length === 0 || raw.visits.length > 500) fail(`У города ${name} должно быть от 1 до 500 визитов.`);
+    const status = raw.status;
+    if (status !== undefined && status !== 'visited' && status !== 'wishlist') fail(`Неверный статус места ${name}.`);
+    let wishNote: string | undefined;
+    if (raw.wishNote !== undefined) {
+      if (status !== 'wishlist') fail('Заметка плана допустима только для места «Хочу посетить».');
+      wishNote = string(raw.wishNote, 'Заметка плана', MAX_NOTE_LENGTH, true);
+    }
+    if (!Array.isArray(raw.visits)) fail(`Неверный список визитов места ${name}.`);
+    if (status === 'wishlist' ? raw.visits.length !== 0 : raw.visits.length === 0 || raw.visits.length > 500) {
+      fail(status === 'wishlist' ? `У запланированного места ${name} не должно быть визитов.` : `У города ${name} должно быть от 1 до 500 визитов.`);
+    }
     const visits = raw.visits.map((item): Visit => {
       const visit = record(item, 'Визит');
       const visitId = id(visit.id, 'ID визита');
@@ -96,6 +106,8 @@ export function validateTrackerData(input: unknown): TrackerData {
       localityName: optionalString(raw.localityName, 'Исходное название', 300),
       regionName: optionalString(raw.regionName, 'Регион', 500),
       osmRefs: refs, visits,
+      ...(status === undefined ? {} : { status }),
+      ...(wishNote === undefined ? {} : { wishNote }),
     };
   });
   return { schemaVersion: 1, countryColors, countryVisits, cities };
@@ -103,12 +115,21 @@ export function validateTrackerData(input: unknown): TrackerData {
 
 export const createEmptyData = (): TrackerData => ({ schemaVersion: 1, countryColors: {}, countryVisits: {}, cities: [] });
 export const createVisit = (): Visit => ({ id: crypto.randomUUID(), date: null, note: '' });
-export function createCity(candidate: PlaceCandidate): City {
+export function createCity(candidate: PlaceCandidate, status: PlaceStatus = 'visited'): City {
   return {
     id: crypto.randomUUID(), name: candidate.name, coordinates: [...candidate.coordinates],
     countryCode: candidate.countryCode, localityName: candidate.localityName, regionName: candidate.regionName,
-    osmRefs: candidate.osmRef ? [candidate.osmRef] : [], visits: [createVisit()],
+    osmRefs: candidate.osmRef ? [candidate.osmRef] : [],
+    visits: status === 'wishlist' ? [] : [createVisit()],
+    ...(status === 'wishlist' ? { status, wishNote: '' } : {}),
   };
+}
+
+/** Fulfil a plan without creating a second place or losing its note. */
+export function markCityVisited(city: City): City {
+  if (city.status !== 'wishlist') return city;
+  const { wishNote, ...place } = city;
+  return { ...place, status: 'visited', visits: [{ ...createVisit(), note: wishNote ?? '' }] };
 }
 
 export type TrackerAction =
@@ -158,7 +179,8 @@ export function getCountryVisitCount(data: TrackerData, code: string): number {
 export function getStats(data: TrackerData) {
   const countries = Object.keys(data.countryColors).filter(isCountryCode).length;
   const countryVisits = Object.keys(data.countryColors).filter(isCountryCode).reduce((sum, code) => sum + getCountryVisitCount(data, code), 0);
-  return { countries, totalCountries: 195, percent: countries / 195 * 100, countryVisits, cities: data.cities.length, visits: data.cities.reduce((sum, city) => sum + city.visits.length, 0) };
+  const visited = data.cities.filter(city => city.status !== 'wishlist');
+  return { countries, totalCountries: 195, percent: countries / 195 * 100, countryVisits, cities: visited.length, visits: visited.reduce((sum, city) => sum + city.visits.length, 0), wishlist: data.cities.length - visited.length };
 }
 
 export function latestVisitDate(city: City): string | null {

@@ -18,6 +18,9 @@ test('the home exposes travel actions and a summary without technical tools; pan
   const tabs = page.getByRole('tab');
   await tabs.first().focus();
   await page.keyboard.press('ArrowRight');
+  await expect(tabs.nth(1)).toBeFocused();
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight');
   await expect(tabs.last()).toBeFocused();
   await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#travel-panel')).toHaveCount(1);

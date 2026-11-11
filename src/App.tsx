@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import {
   Check,
   Flag,
+  Heart,
   ArrowUpRight,
   BookOpen,
   LocateFixed,
@@ -20,19 +21,22 @@ import {
   formatCalendarDate,
   getStats,
   getCountryVisitCount,
+  MAX_NOTE_LENGTH,
   type TrackerAction,
   latestVisitDate,
 } from './domain/tracker';
-import type { City, InteractionMode, LngLat, PlaceCandidate } from './domain/types';
+import type { City, InteractionMode, LngLat, PlaceCandidate, PlaceStatus } from './domain/types';
 import { createGeocoder } from './services/geocoder';
 import { useTracker } from './storage/useTracker';
 import TravelMap from './map/TravelMap';
 import type { TravelMapHandle } from './map/contracts';
 import { CityEditor } from './components/CityEditor';
 import { CountryEditor } from './components/CountryEditor';
+import { PlaceStatusSwitch } from './components/PlaceStatusSwitch';
 import { useViewportLayout } from './hooks/ui/useViewportLayout';
 import { useFocusRestore } from './hooks/ui/useFocusRestore';
 import { useTheme } from './hooks/ui/useTheme';
+import { useMarkerColors } from './hooks/ui/useMarkerColors';
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'Не удалось выполнить действие.';
@@ -42,6 +46,7 @@ export default function App() {
   const { data, blocked } = tracker;
   const stats = getStats(data);
   const { theme, toggleTheme } = useTheme();
+  const { markerColors, setMarkerColor, resetMarkerColors } = useMarkerColors();
   const geocoder = useMemo(() => createGeocoder(), []);
   const mapRef = useRef<TravelMapHandle>(null);
 
@@ -49,7 +54,8 @@ export default function App() {
   const editorFocus = useFocusRestore();
 
   const [mode, setMode] = useState<InteractionMode>('countries');
-  const [tab, setTab] = useState<'countries' | 'cities'>('countries');
+  const [tab, setTab] = useState<'countries' | 'cities' | 'wishlist'>('countries');
+  const [searchIntent, setSearchIntent] = useState<PlaceStatus>('visited');
   const [panel, setPanel] = useState<'search' | 'collection' | null>(null);
   const [toast, setToast] = useState('');
   const [introDismissed, setIntroDismissed] = useState(false);
@@ -72,6 +78,7 @@ export default function App() {
 
   const countriesTabRef = useRef<HTMLButtonElement>(null);
   const citiesTabRef = useRef<HTMLButtonElement>(null);
+  const wishlistTabRef = useRef<HTMLButtonElement>(null);
   const searchAbort = useRef<AbortController | null>(null);
   const reverseAbort = useRef<AbortController | null>(null);
 
@@ -170,7 +177,7 @@ export default function App() {
     const match = findCityMatch(data.cities, candidate);
     if (match.exact) startDraft(match.exact);
     else {
-      startDraft(createCity(candidate));
+      startDraft(createCity(candidate, searchIntent));
       if (match.suggestions.length) setMatches({ candidate, cities: match.suggestions });
     }
     mapRef.current?.flyToCity(match.exact?.coordinates ?? candidate.coordinates);
@@ -185,7 +192,7 @@ export default function App() {
     reverseAbort.current = controller;
     setPanel(null);
     setCountryCode(null);
-    const pending = createCity({ name: '', displayName: '', coordinates });
+    const pending = createCity({ name: '', displayName: '', coordinates }, searchIntent);
     startDraft(pending);
     setReverseStatus('Определяем город… Название можно ввести вручную.');
     try {
@@ -226,13 +233,30 @@ export default function App() {
   function useExistingCity(city: City) {
     if (pendingWriteRef.current) return;
     if (!draft || !matches) return;
-    const refs = new Set(city.osmRefs);
+    // A future plan must never manufacture a past visit or erase its history.
+    if (draft.status === 'wishlist' && city.status !== 'wishlist') {
+      openCity(city.id);
+      return;
+    }
+    const refs = new Set([...city.osmRefs, ...draft.osmRefs]);
     if (matches.candidate.osmRef) refs.add(matches.candidate.osmRef);
-    const combined = {
+    const combined: City = {
       ...structuredClone(city),
       osmRefs: [...refs],
       visits: [...city.visits, ...draft.visits],
     };
+    const joinNotes = (a = '', b = '') => a === b ? a : [a, b].filter(Boolean).join('\n\n');
+    if (city.status === 'wishlist' && draft.status === 'wishlist') {
+      combined.wishNote = joinNotes(city.wishNote, draft.wishNote);
+    } else if (city.status === 'wishlist') {
+      combined.status = 'visited';
+      delete combined.wishNote;
+      combined.visits = draft.visits.map((visit, index) => index === 0 ? { ...visit, note: joinNotes(city.wishNote, visit.note) } : visit);
+    }
+    if ((combined.wishNote?.length ?? 0) > MAX_NOTE_LENGTH || combined.visits.some(visit => visit.note.length > MAX_NOTE_LENGTH)) {
+      setError(`После объединения заметка длиннее ${MAX_NOTE_LENGTH} символов. Сократите заметку перед объединением.`);
+      return;
+    }
     startDraft(combined);
     // New visits are unsaved edits, even though the original city already exists.
     draftOriginal.current = JSON.stringify(city);
@@ -290,9 +314,9 @@ export default function App() {
         reverseAbort.current?.abort();
         setReverseStatus('');
         startDraft(null);
-        setTab('cities');
+        setTab(draft.status === 'wishlist' ? 'wishlist' : 'cities');
         setMode('countries');
-        setToast('Место сохранено');
+        setToast(draft.status === 'wishlist' ? 'Добавлено в желания' : 'Место сохранено');
         editorFocus.recordOpener(`[data-city-list-id="${CSS.escape(savedId)}"]`);
         editorFocus.restoreFocus('[data-focus-id="add-place"]');
       }
@@ -331,10 +355,10 @@ export default function App() {
     setSearchStatus('');
     setResults([]);
     try {
-      const found = await geocoder.searchCities(query, controller.signal);
+      const found = await (searchIntent === 'wishlist' ? geocoder.searchPlaces(query, controller.signal) : geocoder.searchCities(query, controller.signal));
       if (!controller.signal.aborted) {
         setResults(found);
-        if (!found.length) setSearchStatus('Ничего не найдено. Уточните город и страну.');
+        if (!found.length) setSearchStatus('Ничего не найдено. Уточните название и ближайший город.');
       }
     } catch (err) {
       if (!controller.signal.aborted) setSearchStatus(messageOf(err));
@@ -344,21 +368,15 @@ export default function App() {
   }
 
   function handleTabKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-      event.preventDefault();
-      const nextTab = tab === 'countries' ? 'cities' : 'countries';
-      setTab(nextTab);
-      if (nextTab === 'countries') countriesTabRef.current?.focus();
-      else citiesTabRef.current?.focus();
-    } else if (event.key === 'Home') {
-      event.preventDefault();
-      setTab('countries');
-      countriesTabRef.current?.focus();
-    } else if (event.key === 'End') {
-      event.preventDefault();
-      setTab('cities');
-      citiesTabRef.current?.focus();
-    }
+    const tabs = ['countries', 'cities', 'wishlist'] as const;
+    const refs = [countriesTabRef, citiesTabRef, wishlistTabRef];
+    const index = tabs.indexOf(tab);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2
+      : event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    setTab(tabs[next]);
+    refs[next].current?.focus();
   }
 
   const validDraftCoordinates =
@@ -396,7 +414,7 @@ export default function App() {
         <div className="editor-stack">
           {matches ? (
             <section className="match-panel" aria-label="Возможное совпадение города">
-              <h2>Уже были здесь?</h2>
+              <h2>Это место уже есть?</h2>
               {matches.cities.map((city) => (
                 <button
                   type="button"
@@ -404,7 +422,7 @@ export default function App() {
                   key={city.id}
                   onClick={() => useExistingCity(city)}
                 >
-                  Объединить с местом: {city.name}
+                  {draft.status === 'wishlist' && city.status !== 'wishlist' ? 'Открыть посещённое место: ' : 'Объединить с местом: '}{city.name}
                   {city.regionName ? ` · ${city.regionName}` : ''}
                 </button>
               ))}
@@ -453,13 +471,22 @@ export default function App() {
     return normalized ? COUNTRIES.filter(item => item.name.toLocaleLowerCase('ru').includes(normalized)).slice(0, 12) : [];
   }, [query]);
   const savedCountries = COUNTRIES.filter(item => data.countryColors[item.code]);
-  const sortedCities = useMemo(() => [...data.cities].sort((a, b) => a.name.localeCompare(b.name, 'ru')), [data.cities]);
+  const sortedPlaces = useMemo(() => [...data.cities].sort((a, b) => a.name.localeCompare(b.name, 'ru')), [data.cities]);
+  const sortedCities = sortedPlaces.filter(city => city.status !== 'wishlist');
+  const sortedWishes = sortedPlaces.filter(city => city.status === 'wishlist');
   const activePanel = country ? 'country' : draft ? 'city' : panel;
-  const hasPlaces = stats.countries + stats.cities > 0;
+  const hasPlaces = stats.countries + stats.cities + stats.wishlist > 0;
 
-  function openPanel(next: 'search' | 'collection') {
+  function openPanel(next: 'search' | 'collection', intent: PlaceStatus = 'visited', collectionTab?: typeof tab) {
     if (!canLeaveDraft()) return;
-    editorFocus.recordOpener(next === 'search' ? '[data-focus-id="add-place"]' : '[data-focus-id="my-places"]');
+    editorFocus.recordOpener(collectionTab === 'wishlist' || intent === 'wishlist' ? '[data-focus-id="wishlist"]'
+      : next === 'search' ? '[data-focus-id="add-place"]' : '[data-focus-id="my-places"]');
+    if (next === 'search') {
+      searchAbort.current?.abort();
+      setSearching(false); setQuery(''); setResults([]); setSearchStatus('');
+      setSearchIntent(intent);
+    }
+    if (collectionTab) setTab(collectionTab);
     reverseAbort.current?.abort();
     setReverseStatus('');
     startDraft(null);
@@ -517,12 +544,20 @@ export default function App() {
     </li>
   );
 
+  const wishlistEntry = <button type="button" className="wishlist-entry" data-focus-id="wishlist"
+    aria-label="Хочу посетить" aria-controls="travel-panel" disabled={pendingWrite !== null}
+    onClick={() => openPanel('collection', 'wishlist', 'wishlist')}>
+    <Heart size={18} aria-hidden="true" /><span>Хочу посетить</span>
+    {!isMobile ? <span className="wishlist-count">{stats.wishlist}</span> : null}
+  </button>;
+
   return (
     <main className="app" data-panel-open={Boolean(activePanel)}>
       <div className="map-stage">
-        <TravelMap ref={mapRef} theme={theme} mode={mode} countryColors={data.countryColors} cities={data.cities}
+        <TravelMap ref={mapRef} theme={theme} markerColors={markerColors} mode={mode} countryColors={data.countryColors} cities={data.cities}
           selectedCountryCode={countryCode} selectedCityId={draft?.id ?? null}
           draftCoordinates={draft && !data.cities.some(city => city.id === draft.id) ? validDraftCoordinates : null}
+          draftStatus={draft?.status ?? 'visited'}
           onCountrySelect={code => selectCountry(code, false, '[data-testid="travel-map"] canvas')}
           onMapPointSelect={coordinates => { void onMapPointSelect(coordinates); }}
           onCitySelect={id => openCity(id, `[data-testid="city-marker-${CSS.escape(id)}"]`)} />
@@ -546,7 +581,7 @@ export default function App() {
             aria-label="Мои места" aria-expanded={panel === 'collection'} aria-controls="travel-panel"
             disabled={pendingWrite !== null} onClick={() => panel === 'collection' ? closePanel() : openPanel('collection')}>
             <BookOpen size={18} aria-hidden="true" /><span>Мои места</span>
-            {hasPlaces ? <span className="collection-count">{stats.countries + stats.cities}</span> : null}
+            {hasPlaces ? <span className="collection-count">{stats.countries + stats.cities + stats.wishlist}</span> : null}
           </button>
           {!isMobile ? <button type="button" className="primary add-place" data-focus-id="add-place"
             disabled={blocked || pendingWrite !== null} onClick={() => openPanel('search')}>
@@ -572,6 +607,7 @@ export default function App() {
             <div><dt>Поездки в страны</dt><dd>{stats.countryVisits}</dd></div>
           </dl>
           <progress className="overview-progress" max={195} value={stats.countries} aria-label="Посещено стран" />
+          {wishlistEntry}
           {savedCountries.length ? <><h3>Ваши страны</h3><ul className="place-list overview-list">
             {[...savedCountries].sort((a, b) => getCountryVisitCount(data, b.code) - getCountryVisitCount(data, a.code)).slice(0, 3).map(countryRow)}
           </ul><button className="text-button" type="button" onClick={() => openPanel('collection')}>Все мои места<ArrowRight size={18} aria-hidden="true" /></button></> :
@@ -581,7 +617,7 @@ export default function App() {
       </> : null}
 
       {mode === 'flags' && !draft ? <div className="point-instruction" role="status">
-        <MapPin size={18} aria-hidden="true" /><span>Нажмите на место на карте</span>
+        {searchIntent === 'wishlist' ? <Heart size={18} className="wish-icon" aria-hidden="true" /> : <MapPin size={18} aria-hidden="true" />}<span>{searchIntent === 'wishlist' ? 'Выберите место, куда хотите поехать' : 'Нажмите на место на карте'}</span>
         <button type="button" className="text-button" onClick={() => setMode('countries')}>Отмена</button>
       </div> : null}
 
@@ -591,25 +627,28 @@ export default function App() {
         <div className="sheet-handle" aria-hidden="true" />
         {country || draft ? renderEditorContent() : <>
           <header className="section-heading panel-heading">
-            <h2 className="editor-heading">{panel === 'search' ? 'Куда вы ездили?' : 'Мои места'}</h2>
+            <h2 className="editor-heading">{panel === 'search' ? searchIntent === 'wishlist' ? 'Куда хочется поехать?' : 'Куда вы ездили?' : 'Мои места'}</h2>
             <button type="button" className="icon-button" aria-label="Закрыть панель" onClick={closePanel}><X size={20} aria-hidden="true" /></button>
           </header>
           {panel === 'search' ? <div className="search-panel-content">
+            <PlaceStatusSwitch value={searchIntent} onChange={intent => {
+              searchAbort.current?.abort(); setSearching(false); setResults([]); setSearchStatus(''); setSearchIntent(intent);
+            }} />
             <form className="search-form" role="search" onSubmit={event => { event.preventDefault(); void searchCities(); }}>
-              <label className="sr-only" htmlFor="place-search">Страна или город</label>
-              <input ref={searchInput} id="place-search" value={query} placeholder="Страна или город" autoComplete="off"
+              <label className="sr-only" htmlFor="place-search">{searchIntent === 'wishlist' ? 'Город или место' : 'Страна или город'}</label>
+              <input ref={searchInput} id="place-search" value={query} placeholder={searchIntent === 'wishlist' ? 'Город или место' : 'Страна или город'} autoComplete="off"
                 minLength={2} maxLength={200} required onChange={event => {
                   searchAbort.current?.abort(); setSearching(false); setResults([]); setSearchStatus(''); setQuery(event.target.value);
                 }} />
-              <button type="submit" className="icon-button" aria-label="Найти город" disabled={searching || query.trim().length < 2}>
+              <button type="submit" className="icon-button" aria-label={searchIntent === 'wishlist' ? 'Найти место' : 'Найти город'} disabled={searching || query.trim().length < 2}>
                 <Search size={20} aria-hidden="true" />
               </button>
             </form>
             {searching ? <p className="hint search-feedback" role="status">Ищем место…</p> : null}
             {searchStatus ? <p className="hint search-feedback" role="status">{searchStatus}</p> : null}
-            {listedCountries.length > 0 ? <section className="search-section"><h3>Страны</h3><ul className="place-list">{listedCountries.map(countryRow)}</ul></section> : null}
+            {searchIntent === 'visited' && listedCountries.length > 0 ? <section className="search-section"><h3>Страны</h3><ul className="place-list">{listedCountries.map(countryRow)}</ul></section> : null}
             {results.length ? <section className="search-section"><h3>Города и места</h3>
-              <ul className="place-list" aria-label="Результаты поиска города">{results.map((result, index) => <li key={`${result.osmRef}-${index}`}>
+              <ul className="place-list" aria-label={searchIntent === 'wishlist' ? 'Результаты поиска места' : 'Результаты поиска города'}>{results.map((result, index) => <li key={`${result.osmRef}-${index}`}>
                 <button type="button" disabled={blocked || pendingWrite !== null} onClick={() => acceptCandidate(result)}>
                   <MapPin size={18} aria-hidden="true" /><span className="place-name">{result.name}<small>{result.displayName}</small></span>
                   <ArrowUpRight size={16} className="row-arrow" aria-hidden="true" />
@@ -617,7 +656,7 @@ export default function App() {
               </li>)}</ul>
             </section> : null}
             {!searching && !results.length && !searchStatus ? <p className="search-help">
-              {query.trim() ? 'Для поиска города нажмите Enter или значок поиска.' : 'Найдите страну или город, где вы побывали.'}
+              {query.trim() ? 'Для поиска нажмите Enter или значок поиска.' : searchIntent === 'wishlist' ? 'Найдите город, парк или другое место для будущей поездки.' : 'Найдите страну или город, где вы побывали.'}
             </p> : null}
             <button type="button" className="map-pick-button" onClick={chooseOnMap} disabled={blocked}>
               <LocateFixed size={20} aria-hidden="true" /><span>Выбрать на карте<small>Поставьте отметку в любой точке</small></span><ArrowRight size={18} aria-hidden="true" />
@@ -629,22 +668,34 @@ export default function App() {
                 aria-selected={tab === 'countries'} tabIndex={tab === 'countries' ? 0 : -1} onClick={() => setTab('countries')}>Страны <span>{stats.countries}</span></button>
               <button ref={citiesTabRef} type="button" role="tab" id="cities-tab" aria-controls="cities-panel"
                 aria-selected={tab === 'cities'} tabIndex={tab === 'cities' ? 0 : -1} onClick={() => setTab('cities')}>Места <span>{stats.cities}</span></button>
+              <button ref={wishlistTabRef} type="button" role="tab" id="wishlist-tab" aria-controls="wishlist-panel"
+                aria-selected={tab === 'wishlist'} tabIndex={tab === 'wishlist' ? 0 : -1} onClick={() => setTab('wishlist')}>Хочу посетить <span>{stats.wishlist}</span></button>
             </div>
-            <section role="tabpanel" id={tab === 'countries' ? 'countries-panel' : 'cities-panel'} aria-labelledby={tab === 'countries' ? 'countries-tab' : 'cities-tab'}>
+            <section role="tabpanel" id={`${tab}-panel`} aria-labelledby={`${tab}-tab`}>
               {tab === 'countries' ? <ul className="place-list">{savedCountries.map(countryRow)}</ul> : <ul className="place-list">
-                {sortedCities.map(city => <li key={city.id}>
+                {(tab === 'wishlist' ? sortedWishes : sortedCities).map(city => <li key={city.id}>
                   <button type="button" data-city-id={city.id} data-city-list-id={city.id} onClick={() => openCity(city.id)}>
-                    <Flag size={18} aria-hidden="true" /><span className="place-name">{city.name}<small>{city.countryCode ? COUNTRY_BY_CODE.get(city.countryCode)?.name : ''}{latestVisitDate(city) ? `${city.countryCode ? ' · ' : ''}${formatCalendarDate(latestVisitDate(city))}` : ''}</small></span>
+                    {city.status === 'wishlist' ? <Heart size={18} className="wish-icon" aria-hidden="true" /> : <Flag size={18} aria-hidden="true" />}
+                    <span className="place-name">{city.name}<small>{city.countryCode ? COUNTRY_BY_CODE.get(city.countryCode)?.name : ''}{latestVisitDate(city) ? `${city.countryCode ? ' · ' : ''}${formatCalendarDate(latestVisitDate(city))}` : ''}</small>
+                      {city.status === 'wishlist' && city.wishNote ? <small className="wish-preview">{city.wishNote}</small> : null}
+                    </span>
                     <ArrowUpRight size={16} className="row-arrow" aria-hidden="true" />
                   </button>
                 </li>)}
               </ul>}
-              {(tab === 'countries' ? !savedCountries.length : !sortedCities.length) ? <div className="empty-state">
-                <p>{tab === 'countries' ? 'Какая страна была первой?' : 'У каждой поездки есть своё место'}</p>
-                <span>{tab === 'countries' ? 'Выберите её на карте или найдите по названию.' : 'Добавьте город и пару слов о том, что запомнилось.'}</span>
-                <button type="button" className="text-button" disabled={blocked} onClick={() => openPanel('search')}>Добавить место<ArrowRight size={16} aria-hidden="true" /></button>
+              {(tab === 'countries' ? !savedCountries.length : tab === 'wishlist' ? !sortedWishes.length : !sortedCities.length) ? <div className="empty-state">
+                <p>{tab === 'countries' ? 'Какая страна была первой?' : tab === 'wishlist' ? 'Куда зовёт любопытство?' : 'У каждой поездки есть своё место'}</p>
+                <span>{tab === 'countries' ? 'Выберите её на карте или найдите по названию.' : tab === 'wishlist' ? 'Сохраните места для будущих поездок. На карте они появятся сердечками.' : 'Добавьте город и пару слов о том, что запомнилось.'}</span>
+                {tab !== 'wishlist' ? <button type="button" className="text-button" disabled={blocked} onClick={() => openPanel('search')}>Добавить место<ArrowRight size={16} aria-hidden="true" /></button> : null}
               </div> : null}
+              {tab === 'wishlist' ? <button type="button" className="primary wish-primary wide add-wish" disabled={blocked || pendingWrite !== null} onClick={() => openPanel('search', 'wishlist')}><Plus size={18} aria-hidden="true" />Добавить желание</button> : null}
             </section>
+            <details className="marker-colors">
+              <summary>Цвет отметок</summary>
+              <label className="custom-color"><span>Посещённые места</span><input type="color" aria-label="Цвет посещённых мест" value={markerColors.visited} onChange={event => setMarkerColor('visited', event.target.value)} /></label>
+              <label className="custom-color"><span>Хочу посетить</span><input type="color" aria-label="Цвет желаний" value={markerColors.wishlist} onChange={event => setMarkerColor('wishlist', event.target.value)} /></label>
+              <button type="button" className="text-button" onClick={resetMarkerColors}>Вернуть цвета</button>
+            </details>
             <p className="local-save-note">Сохраняется на этом устройстве</p>
           </div>}
         </>}
@@ -653,7 +704,10 @@ export default function App() {
 
       {isMobile && !activePanel && mode === 'countries' ? <div className="mobile-dock" data-ui-panel="sheet">
         <div className="mobile-dock-caption">{`${stats.countries} ${plural(stats.countries, 'страна', 'страны', 'стран')} · ${stats.cities} ${plural(stats.cities, 'место', 'места', 'мест')} · ${stats.countryVisits} ${plural(stats.countryVisits, 'поездка', 'поездки', 'поездок')}`}</div>
-        <button type="button" className="primary wide" data-focus-id="add-place" disabled={blocked || pendingWrite !== null} onClick={() => openPanel('search')}><Plus size={20} aria-hidden="true" />Добавить место</button>
+        <div className="mobile-dock-actions">
+          <button type="button" className="primary wide" data-focus-id="add-place" disabled={blocked || pendingWrite !== null} onClick={() => openPanel('search')}><Plus size={18} aria-hidden="true" />Добавить место</button>
+          {wishlistEntry}
+        </div>
       </div> : null}
 
       <div className="notifications" aria-live="polite">

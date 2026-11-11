@@ -1,6 +1,7 @@
 /** Coordinates are always [longitude, latitude], in degrees. */
 export type LngLat = [number, number];
 export type InteractionMode = 'countries' | 'flags';
+export type PlaceStatus = 'visited' | 'wishlist';
 
 export interface Visit {
   id: string;
@@ -19,6 +20,10 @@ export interface City {
   regionName?: string;
   osmRefs: string[];
   visits: Visit[];
+  /** Older records omit the status and represent visited places. */
+  status?: PlaceStatus;
+  /** A plan is not a visit; this note moves to the first visit on conversion. */
+  wishNote?: string;
 }
 
 export interface PlaceCandidate {

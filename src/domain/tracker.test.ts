@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createCity, createEmptyData, createVisit, findCityMatch, getCountryVisitCount, getStats, isCalendarDate, trackerReducer, validateTrackerData } from './tracker';
+import { createCity, createEmptyData, createVisit, findCityMatch, getCountryVisitCount, getStats, isCalendarDate, markCityVisited, trackerReducer, validateTrackerData } from './tracker';
 import type { PlaceCandidate } from './types';
 
 const paris: PlaceCandidate = { name: 'Париж', displayName: 'Париж, Франция', coordinates: [2.35, 48.85], countryCode: 'FR', localityName: 'Париж', osmRef: 'node:123' };
@@ -88,5 +88,72 @@ describe('travel invariants', () => {
     expect(() => validateTrackerData({ ...createEmptyData(), countryVisits: null })).toThrow(/Посещения стран/);
     expect(() => validateTrackerData({ ...createEmptyData(), countryVisits: [] })).toThrow(/Посещения стран/);
     expect(trackerReducer(createEmptyData(), { type: 'setCountryVisits', code: 'KG', count: 999 }).countryVisits?.KG).toBe(999);
+  });
+});
+
+describe('planned places', () => {
+  it('keeps a plan out of visited statistics and preserves its distinct note', () => {
+    const plan = { ...createCity(paris, 'wishlist'), wishNote: 'Хочу увидеть рассвет над Сеной' };
+    const data = trackerReducer(createEmptyData(), { type: 'saveCity', city: plan });
+    expect(data.cities[0]).toEqual(plan);
+    expect(plan.visits).toEqual([]);
+    expect(getStats(data)).toMatchObject({ cities: 0, visits: 0, countries: 0, countryVisits: 0, wishlist: 1 });
+    const visited = createCity({ ...paris, osmRef: undefined, name: 'Другой город' });
+    visited.visits.push(createVisit());
+    expect(getStats(trackerReducer(data, { type: 'saveCity', city: visited }))).toMatchObject({ cities: 1, visits: 2, wishlist: 1 });
+  });
+
+  it('converts a plan once while keeping identity, context and all note text', () => {
+    const plan = { ...createCity(paris, 'wishlist'), wishNote: 'Музей <не HTML>\nИ прогулка', regionName: 'Иль-де-Франс' };
+    const visited = markCityVisited(plan);
+    expect(visited).toMatchObject({ id: plan.id, coordinates: plan.coordinates, osmRefs: plan.osmRefs, countryCode: plan.countryCode, localityName: plan.localityName, regionName: plan.regionName, status: 'visited' });
+    expect(visited.visits).toHaveLength(1);
+    expect(visited.visits[0]).toMatchObject({ note: plan.wishNote, date: null });
+    expect(visited.visits[0].id).toBeTruthy();
+    expect(visited).not.toHaveProperty('wishNote');
+    expect(plan.visits).toEqual([]);
+    expect(plan.status).toBe('wishlist');
+    expect(markCityVisited(visited)).toEqual(visited);
+    const saved = trackerReducer({ ...createEmptyData(), cities: [plan] }, { type: 'saveCity', city: visited });
+    expect(saved.cities).toHaveLength(1);
+    expect(getStats(saved)).toMatchObject({ cities: 1, visits: 1, wishlist: 0, countries: 0 });
+  });
+
+  it('reads legacy visited places without adding status or plan-note fields', () => {
+    const city = createCity(paris);
+    city.visits.push({ ...createVisit(), date: '2025-06-17', note: 'Прежний визит' });
+    const parsed = validateTrackerData({ ...createEmptyData(), cities: [city] }).cities[0];
+    expect(parsed).toEqual(city);
+    expect(parsed).not.toHaveProperty('status');
+    expect(parsed).not.toHaveProperty('wishNote');
+    expect(markCityVisited(parsed)).toEqual(city);
+    const explicit = { ...city, status: 'visited' as const };
+    expect(validateTrackerData({ ...createEmptyData(), cities: [explicit] }).cities[0]).toEqual(explicit);
+  });
+
+  it('matches plans together with visited places instead of duplicating one OSM object', () => {
+    const plan = createCity(paris, 'wishlist');
+    expect(findCityMatch([plan], paris).exact?.id).toBe(plan.id);
+    expect(findCityMatch([plan], { ...paris, osmRef: undefined }).suggestions).toEqual([plan]);
+    const visited = createCity(paris);
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [plan, visited] })).toThrow(/OSM/);
+  });
+
+  it.each([null, '', 'planned', 1, {}, []])('rejects invalid place status %s', status => {
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [{ ...createCity(paris), status }] })).toThrow(/статус/);
+  });
+
+  it('rejects visits on plans and plan notes on visited places rather than discarding information', () => {
+    const plan = createCity(paris, 'wishlist');
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [{ ...plan, visits: [createVisit()] }] })).toThrow(/не должно быть визитов/);
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [{ ...plan, visits: null }] })).toThrow(/список визитов/);
+    expect(() => validateTrackerData({ ...createEmptyData(), cities: [{ ...createCity(paris), wishNote: 'Нельзя терять' }] })).toThrow(/Заметка плана/);
+    for (const wishNote of [null, 123, {}, 'x'.repeat(1001)]) {
+      expect(() => validateTrackerData({ ...createEmptyData(), cities: [{ ...plan, wishNote }] })).toThrow(/Заметка плана/);
+    }
+    expect(validateTrackerData({ ...createEmptyData(), cities: [{ ...plan, wishNote: 'x'.repeat(1000) }] }).cities[0].wishNote).toHaveLength(1000);
+    const { wishNote: _unused, ...withoutNote } = plan;
+    expect(validateTrackerData({ ...createEmptyData(), cities: [withoutNote] }).cities[0]).not.toHaveProperty('wishNote');
+    expect(markCityVisited(withoutNote).visits[0].note).toBe('');
   });
 });

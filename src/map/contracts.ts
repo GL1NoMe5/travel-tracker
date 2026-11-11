@@ -1,4 +1,5 @@
 import type { City, InteractionMode, LngLat } from '../domain/types';
+import type { MarkerColors } from './markerColors';
 
 export interface TravelMapProps {
   theme?: 'light' | 'dark';
@@ -8,6 +9,8 @@ export interface TravelMapProps {
   selectedCountryCode: string | null;
   selectedCityId: string | null;
   draftCoordinates: LngLat | null;
+  draftStatus?: 'visited' | 'wishlist';
+  markerColors?: MarkerColors;
   onCountrySelect: (code: string) => void;
   onMapPointSelect: (coordinates: LngLat) => void;
   onCitySelect: (id: string) => void;
